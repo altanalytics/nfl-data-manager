@@ -23,7 +23,7 @@ ENV LC_ALL=en_US.UTF-8
 RUN dnf -y install openssl-devel libxml2-devel libjpeg-turbo-devel libpng-devel
 
 # Install R packages
-RUN Rscript -e "install.packages(c('httr','lambdr','jsonlite','nflfastR'), repos = 'https://cloud.r-project.org/')"
+RUN Rscript -e "install.packages(c('lambdr','jsonlite'), repos = 'https://cloud.r-project.org/')"
 
 # Copy R files to Lambda task root
 COPY *.R ${LAMBDA_TASK_ROOT}/
