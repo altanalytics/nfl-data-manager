@@ -14,6 +14,5 @@ phases:
       - npm install
   build:
     commands:
-      - cd data_manager || true   #
       - cdk synth
       - cdk deploy --require-approval never
