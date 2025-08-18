@@ -1,5 +1,9 @@
 version: 0.2
 
+env:
+  variables:
+    CDK_DISABLE_NOTICES: "true"
+
 phases:
   install:
     runtime-versions:
@@ -15,4 +19,4 @@ phases:
   build:
     commands:
       - cdk synth
-      - cdk deploy --require-approval never
+      - cdk deploy --require-approval never --no-notices
