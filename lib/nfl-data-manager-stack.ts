@@ -27,7 +27,7 @@ export class NflDataManagerStack extends cdk.Stack {
       initialPolicy: [lambdaPolicy],
       retryAttempts: 0,
       architecture: lambda.Architecture.ARM_64,
-      code: lambda.DockerImageCode.fromImageAsset('./r_backend', {
+      code: lambda.DockerImageCode.fromImageAsset('./r-data-pull', {
         platform: ecr_assets.Platform.LINUX_ARM64,
       }),
       memorySize: 2048,
