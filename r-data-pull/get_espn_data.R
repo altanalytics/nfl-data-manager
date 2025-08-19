@@ -1,68 +1,39 @@
 ###########################
-# File: nfl_working.R
-# Description: This file is used to handle working manually
+# File: get_espn_data.R
+# Description: This file is used to get the PBP and ESPN data for each game
 # Date: 8/17/2025
 # Author: Anthony Trevisan
-# Notes:
+# Notes: Links found here: https://gist.github.com/nntrn/ee26cb2a0716de0947a0a4e9a157bc1c
 ###########################
 
 
-profile = 'nfl'
-setwd('~/Coding/git_repos/nfl-data-manager/r-data-pull')
-Sys.setenv(AWS_PROFILE = profile, AWS_REGION = 'us-east-1')
-source('nfl_helpers.R')
-
-
-# Read the most recent cache file
-cache_dir <- "~/.aws/cli/cache/"
-system('rm -rf ~/.aws/cli/cache/')
-system(paste0('aws s3 ls --profile ',profile)) # forces new cli file
-cache_files <- list.files(cache_dir, full.names = TRUE)
-latest_cache <- cache_files[which.max(file.info(cache_files)$mtime)]
-cache_data <- fromJSON(latest_cache)
-
-# Set environment variables
-Sys.setenv(
-  AWS_ACCESS_KEY_ID = cache_data$Credentials$AccessKeyId,
-  AWS_SECRET_ACCESS_KEY = cache_data$Credentials$SecretAccessKey,
-  AWS_SESSION_TOKEN = cache_data$Credentials$SessionToken
-)
-
-
-rvest::read_html('https://www.espn.com/nfl/boxscore/_/gameId/401773017')
-
-url = 'https://www.espn.com/nfl/boxscore/_/gameId/401773017'
-page <- httr::GET(url, httr::user_agent("Mozilla/5.0"))
-html <- read_html(page)
-
-  spot_table <- read_html(url)
-  spot_table %>%
-    html_nodes("table") %>%
-    .[[1]] %>%
-    html_table()
-  spot_table %>%
-    html_nodes("table") %>%
-    .[[8]] %>%
-    html_table()
-
-  gms = GET(paste0('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=20240501-2025&limit=1000'))
-  all_games = NULL
-  dts=2023
-  for(dts in 2008:2025){
-    print(dts)
-    strt = paste0(dts,'0601')
-    end = paste0(dts+1,'0501')
-    gms = GET(paste0('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=',strt,'-',end,'&limit=1000'))
-    gms = content(gms)
-    
-
-
-    for(ev in gms$events){
+get_espn_data = function(){
+  
+  # Get Existing ESPN Game details
+  espn_game_details = s3readRDS(bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
+  
+  
+  #############################
+  ########### Get Full Schedule
+  #############################
+  
+  
+  # Set API Call for entire latest season
+  dts = year(Sys.Date()-90)
+  strt = paste0(dts,'0601')
+  end = paste0(dts+1,'0501')
+  gms = GET(paste0('https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=',strt,'-',end,'&limit=1000'))
+  gms = content(gms)
+  
+  # Create Game List
+  print('Parse NFL Schedule Data')
+  all_games=NULL
+  for(ev in gms$events){
+     
+      # Filter for completed games only
       print(ev$shortName)
-      
-
-      if(!is.null(ev$competitions[[1]]$competitors[[1]]$winner)&ev$shortName!="HOU VS CHI"){
-      
+      if(ev$status$type$completed!=FALSE){
+      # Extract key fields from json file
       temp_game = tibble(
         season = ev$season$year,
         season_type = ev$season$type,
@@ -116,36 +87,80 @@ html <- read_html(page)
       
       all_games = bind_rows(temp_game,all_games)
       }
-      
-    }
-    
   }
+    
+  
+  print('Schedule Parsed')
+  
+  # Merge new schedule with existing schedule
+  new_game_details = espn_game_details %>%
+    filter(!(espn_id %in% all_games$espn_id))
+  new_game_details = rbind(new_game_details,all_games) %>%
+    distinct(unique_id,.keep_all = T) %>% 
+    arrange(date_time)
+  aws.s3::s3saveRDS(new_game_details,bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
+  
 
-  upd_df = all_games %>% distinct() %>% arrange(date_time)
-  aws.s3::s3saveRDS(upd_df,bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
+  # Create a clean schedule with consolidated team names
+  schedule = new_game_details %>% 
+    mutate(home_team = ifelse(team_1_home_away=='home',team_1_abbreviation,team_2_abbreviation),
+           home_team = case_when(home_team == 'LA'~'LAR',
+                                 home_team == 'SD'~'LAC',
+                                 home_team == 'STL'~'LAR',
+                                 home_team == 'WAS'~'WSH',
+                                 home_team == 'OAK'~'LV',
+                                 TRUE ~ home_team),
+           away_team = ifelse(team_2_home_away=='home',team_1_abbreviation,team_2_abbreviation),
+           away_team = case_when(away_team == 'LA'~'LAR',
+                                 away_team == 'SD'~'LAC',
+                                 away_team == 'STL'~'LAR',
+                                 away_team == 'WAS'~'WSH',
+                                 away_team == 'OAK'~'LV',
+                                 TRUE ~ away_team),
+           winning_team = ifelse(team_1_final_score==team_2_final_score,'TIE',
+                                 ifelse(team_1_final_score>team_2_final_score,home_team,away_team)),
+           matchup = paste0(away_team,'_',home_team)) %>%
+    select(season:game_short_name,matchup,home_team,home_score = team_1_final_score,
+           away_team,away_score=team_2_final_score,winning_team) %>%
+    filter(season_name != 'preseason') %>%
+    arrange(date_time)
+  
+  s3_csv_save(schedule,path='admin/clean_schedule.csv')
 
   
-  espn_game_details %>% filter(team_1_abbreviation=='WSH',season == 2019)
-  espn_game_details = s3readRDS(bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
-  rn=4000
-  for(rn in 3000:3020){
+  
+ 
+  
+  #############################
+  ########### Get Game Details
+  #############################
+  
+  filt_df = new_game_details %>%
+    filter(date > Sys.Date()-3)
+  
+  
+  
+  for(rn in 1:nrow(filt_df)){
     Sys.sleep(1)
     print(paste0('Row Number: ',rn))
     
-    game_summary = as.list(espn_game_details[rn,])
-
+    # Get current game
+    game_summary = as.list(filt_df[rn,])
     
+    # Create key variables
     gm_unq_id = game_summary$unique_id
     gm_espn_id = game_summary$espn_id
     print(gm_unq_id)
     week_text = espn_game_details$season_week[rn]
     week_text = ifelse(week_text<10,paste0('0',week_text),week_text)
     
+    # Make API Call and create base save path for this game
     gm_summary = GET(paste0('https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=',gm_espn_id))
     gm_summary = content(gm_summary)  
     path = paste('nfl_espn_data',paste0('season_',espn_game_details$season[rn]),espn_game_details$season_name[rn],
                  paste0('week_',week_text),gm_unq_id,sep='/')
     
+    # Save current game as a json 
     s3write_using(
       FUN = function(obj, file) {
         write_json(obj, path = file, pretty = TRUE, auto_unbox = TRUE)
@@ -155,7 +170,9 @@ html <- read_html(page)
       object = paste0(path,'/inputs/',gm_unq_id,'_game_summary.json')
     )
     
-    ## Get Team Statistics from the game
+    #######################################
+    ## 1. Get Team Statistics from the game
+    
     all_tm_stats = NULL
     print('Get summary stats for each team')
     for(tm in gm_summary$boxscore$teams){
@@ -173,9 +190,12 @@ html <- read_html(page)
       all_tm_stats = rbind(all_tm_stats,tm_stats)
       
     }
-
+    
     nrow(all_tm_stats)
     s3_csv_save(all_tm_stats,path=paste0(path,'/inputs/',gm_unq_id,'_game_stats.csv'))
+    
+    #########################################
+    ## 1. Get player Statistics from the game
     
     print('Get Player Stats')
     all_play_stats = NULL
@@ -211,36 +231,8 @@ html <- read_html(page)
     nrow(all_play_stats)
     s3_csv_save(all_play_stats,path=paste0(path,'/inputs/',gm_unq_id,'_player_stats.csv'))
     
-    # all_injuries = NULL
-    # print('Checking Injuries')
-    # for(inj in gm_summary$injuries){
-    #   
-    #   team = inj$team$abbreviation
-    #   team_id = inj$team$id
-    #   tm_injury = bind_rows(lapply(inj$injuries,function(x)
-    #     tibble(espn_id = gm_espn_id,
-    #            unique_id = gm_unq_id,
-    #            team_abbreviation = team,
-    #            team_id = team_id,
-    #            status = x$status,
-    #            athlete_name = x$athlete$displayName,
-    #            athlete_first = x$athlete$firstName,
-    #            athlete_last = x$athlete$lastName,
-    #            athlete_short = x$athlete$shortName,
-    #            injury_id = x$type$id,
-    #            injury_name = x$type$name,
-    #            injury_description = x$type$description,
-    #            injury_abbreviation = x$type$abbreviation,
-    #            
-    #     )
-    #   )
-    #   )
-    #   all_injuries = bind_rows(all_injuries,tm_injury)
-    # }
-    # 
-    # nrow(all_injuries)
-    # s3_csv_save(all_injuries,path=paste0(path,'/inputs/',gm_unq_id,'_injury_report.csv'))
-    
+    #######################################
+    ## 3. Get Drive and Play by Play Data
     
     all_drives = NULL
     pbp_all= NULL
@@ -303,18 +295,10 @@ html <- read_html(page)
     nrow(all_drives)
     s3_csv_save(all_drives,path=paste0(path,'/inputs/',gm_unq_id,'_drive_report.csv'))
     s3_csv_save(pbp_all,path=paste0(path,'/inputs/',gm_unq_id,'_play_by_play.csv'))
-    # print('Get play by play data')
-    # pbp = GET(paste0('https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/events/',gm_espn_id,
-    #                  '/competitions/',gm_espn_id,'/plays?limit=500'))
-    # pbp = content(pbp)
+
     
-    
-    
-    
-    # nrow(pbp_all)
-    
-    
-    
+    #######################################
+    ## 4. Get game outputs (recap and headling)
     
     ### OUTPUTS
     print('Get End of Game Recap')
@@ -332,53 +316,12 @@ html <- read_html(page)
         bucket = s3_bucket,
         object = paste0(path,'/outputs/',gm_unq_id,'_game_recap.json')
       )
-
+      
     }
   }
-
-
-
-
-
-
-library(rvest)
-
-
-
-
-
-
-pbp = GET('https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/events/401773017/competitions/401773017/plays?limit=500')
-pbp = content(pbp)
-
-pbp_all= NULL
-for(ply in pbp$items){
   
   
-  ply_tmp = tibble(
-    espn_id = gm_espn_id,
-    unique_id = gm_unq_id,
-    yardage = ply$statYardage,
-    quarter = ply$period$number,
-    time_remaining = ply$clock$displayValue,
-    down = ply$start$down,
-    distance = ply$start$distance,
-    yardline = ply$start$yardLine,
-    yards_to_endzone = ply$start$yardsToEndzone,
-    possession = ply$start$possessionText,
-    play_text = ply$text
-  )
-  pbp_all = bind_rows(pbp_all,ply_tmp)
+  
+  
 }
-
-
-df <- gm_summary$boxscore$teams[[1]]$statistics |>
-  map(~as.data.frame(.x)) |>
-  mutate(across(any_of("value"), as.character)) |>
-  bind_rows(.id = "stat_idx")
-
-
-pbp_summary = GET('https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/events/401249063/competitions/401249063/plays?limit=500')
-pbp_summary = content(pbp_summary)  
-
 

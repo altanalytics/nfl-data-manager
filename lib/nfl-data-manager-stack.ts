@@ -15,7 +15,6 @@ export class NflDataManagerStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       resources: ['*'],
       actions: [
-        "secretsmanager:*", 
         "s3:*", 
         "lambda:*"
       ],
@@ -51,26 +50,38 @@ export class NflDataManagerStack extends cdk.Stack {
     // Define schedules and messages for rules
     const schedules = [
       { 
-        name: 'daily_grab', 
+        name: 'daily_data', 
         cron: events.Schedule.cron({ 
-          minute: '55', 
-          hour: '11', 
-          month: '*', 
+          minute: '30', 
+          hour: '12', 
+          month: '1,2,8,9,10,11,12', 
           weekDay: '*', 
           year: '*' 
         }), 
-        msg: { lambda_input: { msg: 'daily' } } 
+        msg: { lambda_input: { msg: 'get_espn' } } 
       },
+      // Fantasy Ends by December
       { 
-        name: 'in_game_refresh', 
+        name: 'fantasy_data_night', 
         cron: events.Schedule.cron({ 
           minute: '0/10', 
-          hour: '12-23', 
-          month: '*', 
-          weekDay: 'MON-FRI', 
+          hour: '0-5', 
+          month: '9-12', 
+          weekDay: 'MON,THUR,SUN', 
           year: '*' 
         }), 
-        msg: { lambda_input: { msg: 'snapshot' } } 
+        msg: { lambda_input: { msg: 'get_fantasy_night' } } 
+      },
+      { 
+        name: 'fantasy_data_day', 
+        cron: events.Schedule.cron({ 
+          minute: '0/10', 
+          hour: '17-23', 
+          month: '9-12', 
+          weekDay: 'SUN', 
+          year: '*' 
+        }), 
+        msg: { lambda_input: { msg: 'get_fantasy_day' } } 
       },
     ];
 
