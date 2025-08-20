@@ -8,7 +8,6 @@ RUN dnf update -y
 # Install necessary system dependencies
 RUN dnf -y install R awscli wget tar \
     poppler-cpp-devel libpsl-devel perl-core \
-    openssl-devel libxml2-devel libjpeg-turbo-devel libpng-devel \
     libcurl-devel ca-certificates glibc-langpack-en
 
 # Install locale package for en_US.UTF-8 support (skip locale generation)
@@ -21,9 +20,10 @@ ENV LC_ALL=en_US.UTF-8
 
 # System requirements for R packages jpeg/png for tableHTML, xml2 for paws
 RUN dnf -y install openssl-devel libxml2-devel libjpeg-turbo-devel libpng-devel
+RUN dnf -y install bzip2 xz lz4 zstd brotli # for Arrow
 
 # Install R packages
-RUN Rscript -e "install.packages(c('lambdr','jsonlite','httr','nflfastR','lubirdate'), repos = 'https://cloud.r-project.org/')"
+RUN Rscript -e "install.packages(c('lambdr','jsonlite','httr','nflfastR','lubirdate','arrow'), repos = 'https://cloud.r-project.org/')"
 RUN Rscript -e "install.packages(c('tableHTML','readr','aws.s3','dplyr','tidyr','rvest'), repos = 'https://cloud.r-project.org/')"
 
 # Copy R files to Lambda task root

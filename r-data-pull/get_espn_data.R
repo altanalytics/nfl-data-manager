@@ -11,7 +11,7 @@ get_espn_data = function(){
   
   # Get Existing ESPN Game details
   espn_game_details = s3readRDS(bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
-  
+  library(arrow)
   
   #############################
   ########### Get Full Schedule
@@ -98,7 +98,13 @@ get_espn_data = function(){
   new_game_details = rbind(new_game_details,all_games) %>%
     distinct(unique_id,.keep_all = T) %>% 
     arrange(date_time)
-  aws.s3::s3saveRDS(new_game_details,bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
+  s3saveRDS(new_game_details,bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
+  s3write_using(
+    x = new_game_details,
+    FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+    object = "nfl_espn_database/game_schedule/full_espn_game_sch.parquet",   # key within the bucket
+    bucket = s3_bucket
+  )
   
 
   # Create a clean schedule with consolidated team names
@@ -157,8 +163,12 @@ get_espn_data = function(){
     # Make API Call and create base save path for this game
     gm_summary = GET(paste0('https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=',gm_espn_id))
     gm_summary = content(gm_summary)  
-    path = paste('nfl_espn_data',paste0('season_',espn_game_details$season[rn]),espn_game_details$season_name[rn],
+    path = paste('nfl_espn_data',paste0('season_',filt_df$season[rn]),filt_df$season_name[rn],
                  paste0('week_',week_text),gm_unq_id,sep='/')
+    db_path = paste('nfl_espn_database','PLACEHOLDER',
+                    paste0('nfl_season=',filt_df$season[rn]),
+                    paste0('nfl_season_type=',filt_df$season_name[rn]),
+                    paste0('nfl_week=',week_text),gm_unq_id,sep='/')
     
     # Save current game as a json 
     s3write_using(
@@ -193,6 +203,12 @@ get_espn_data = function(){
     
     nrow(all_tm_stats)
     s3_csv_save(all_tm_stats,path=paste0(path,'/inputs/',gm_unq_id,'_game_stats.csv'))
+    s3write_using(
+      x = all_tm_stats,
+      FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+      object = paste0(gsub('PLACEHOLDER','team_stats',db_path),'_team_stats.parquet'),   
+      bucket = s3_bucket
+    )
     
     #########################################
     ## 1. Get player Statistics from the game
@@ -230,6 +246,12 @@ get_espn_data = function(){
     
     nrow(all_play_stats)
     s3_csv_save(all_play_stats,path=paste0(path,'/inputs/',gm_unq_id,'_player_stats.csv'))
+    s3write_using(
+      x = all_play_stats,
+      FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+      object = paste0(gsub('PLACEHOLDER','player_stats',db_path),'_player_stats.parquet'),   
+      bucket = s3_bucket
+    )
     
     #######################################
     ## 3. Get Drive and Play by Play Data
@@ -295,6 +317,20 @@ get_espn_data = function(){
     nrow(all_drives)
     s3_csv_save(all_drives,path=paste0(path,'/inputs/',gm_unq_id,'_drive_report.csv'))
     s3_csv_save(pbp_all,path=paste0(path,'/inputs/',gm_unq_id,'_play_by_play.csv'))
+    
+    s3write_using(
+      x = all_drives,
+      FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+      object = paste0(gsub('PLACEHOLDER','drive_report',db_path),'_drive_report.parquet'),   
+      bucket = s3_bucket
+    )
+
+    s3write_using(
+      x = pbp_all,
+      FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+      object = paste0(gsub('PLACEHOLDER','play_by_play',db_path),'_play_by_play.parquet'),   
+      bucket = s3_bucket
+    )
 
     
     #######################################
@@ -315,6 +351,12 @@ get_espn_data = function(){
         x = game_recap,
         bucket = s3_bucket,
         object = paste0(path,'/outputs/',gm_unq_id,'_game_recap.json')
+      )
+      s3write_using(
+        x = game_recap,
+        FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+        object = paste0(gsub('PLACEHOLDER','game_recap',db_path),'_game_recap.json'),   
+        bucket = s3_bucket
       )
       
     }
