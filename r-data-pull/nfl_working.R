@@ -4,13 +4,14 @@
 # Date: 8/17/2025
 # Author: Anthony Trevisan
 # Notes:
+# ToDo: Database setup, HAR auto, validate pulls, determine winner/loser, cleanup/comment, set live updates, PBP pass/Rush/rec
 ###########################
 
 
 profile = 'nfl'
 setwd('~/Coding/git_repos/nfl-data-manager/r-data-pull')
 Sys.setenv(AWS_PROFILE = profile, AWS_REGION = 'us-east-1')
-source('nfl_helpers.R')
+
 
 
 # Read the most recent cache file
@@ -27,6 +28,85 @@ Sys.setenv(
   AWS_SECRET_ACCESS_KEY = cache_data$Credentials$SecretAccessKey,
   AWS_SESSION_TOKEN = cache_data$Credentials$SessionToken
 )
+
+source('nfl_helpers.R')
+
+
+
+
+
+get_s3_listing <- function(bucket, prefix) {
+  token <- NULL
+  rows  <- list()
+  
+  repeat {
+    resp <- chk$list_objects_v2(Bucket = bucket, Prefix = prefix,
+                                ContinuationToken = token)
+    
+    if (!is.null(resp$KeyCount)) message("Fetched: ", resp$KeyCount, " keys")
+    
+    if (!is.null(resp$Contents)) {
+      page <- lapply(resp$Contents, function(obj) {
+        vec <- strsplit(obj$Key, "/", fixed = TRUE)[[1]]
+        tibble(
+          top    = vec[1],
+          season = vec[2],
+          stype  = vec[3],
+          week   = vec[4],
+          game   = vec[5],
+          inout  = vec[6],
+          file   = vec[7]
+        )
+      })
+      rows <- c(rows, page)
+    }
+    
+    # Stop if no more pages
+    if (!isTRUE(resp$IsTruncated)) break
+    token <- resp$NextContinuationToken
+  }
+  
+  bind_rows(rows)
+}
+
+lst <- get_s3_listing(s3_bucket, "nfl_espn_data/")
+
+
+lst %>%
+  rename(file_nm = file) %>%
+  mutate(
+    yrs = gsub("season_", "", season),
+    chk = mapply(function(y, f) grepl(y, f), yrs, file_nm)
+  ) %>% filter(chk) -> upd
+
+
+upd %>% 
+  group_by(season,game) %>%
+  mutate(ct=n()) %>% filter(ct==5) %>% group_by(season) %>% summarise(ct=n())
+  summarise(mx = max(ct), mn = min(ct))
+
+lst %>% group_by(season) %>% summarise(ct = n())
+espn_game_details %>%
+  filter(!(unique_id %in% upd$game))
+
+library(aws.s3)
+library(dplyr)
+
+# List objects
+objs <- get_bucket(bucket = s3_bucket, prefix = "nfl_espn_data")
+length(objs)
+# Convert to data frame
+df <- do.call(rbind, lapply(objs, as.data.frame))
+
+# Clean up columns
+df <- df %>%
+  select(Key, LastModified, Size, StorageClass)
+
+#### Resave ESPN Login details
+espn_2 = 'espn_s2=ABCD;'
+swid = 'SWID={12345};'
+espn_login = list(espn_2 = espn_2, swid = swid)
+aws.s3::s3saveRDS(espn_login, bucket = s3_bucket, object = 'fantasy_data/espn_login.rds')
 
 
 rvest::read_html('https://www.espn.com/nfl/boxscore/_/gameId/401773017')
@@ -127,8 +207,8 @@ html <- read_html(page)
   
   espn_game_details %>% filter(team_1_abbreviation=='WSH',season == 2019)
   espn_game_details = s3readRDS(bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
-  rn=4000
-  for(rn in 3000:3020){
+  rn=1389
+  for(rn in 5339:nrow(espn_game_details)){
     Sys.sleep(1)
     print(paste0('Row Number: ',rn))
     

@@ -4,6 +4,7 @@
 # Date: 8/17/2025
 # Author: Anthony Trevisan
 # Notes: Links found here: https://gist.github.com/nntrn/ee26cb2a0716de0947a0a4e9a157bc1c
+# ToDo: Determine winner and loser
 ###########################
 
 
@@ -12,6 +13,31 @@ get_espn_data = function(){
   # Get Existing ESPN Game details
   espn_game_details = s3readRDS(bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
   library(arrow)
+  
+  #############################
+  ########### Get Daily Fantasy Data 
+  #############################
+  
+  if(weekdays(Sys.Date()) %in% c('Tuesday','Thursday','Saturday')){
+    tms = espn_fantasy_loop(1:12)
+    team_df = aws.s3::s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_teams.csv') %>%
+      filter(!is.na(team_number))
+    
+    team_df %>%
+      left_join(select(tms,espn_league,espn_league_team_id=id,new_nickname=name)) %>%
+      mutate(team_nickname = new_nickname,
+             new_nickname = NULL) -> new_team_df
+    
+    aws.s3::s3write_using(new_team_df,FUN=write_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_teams.csv') 
+    
+    
+    schedule_df <- s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_schedule.csv') %>%
+      left_join(select(team_df,home=team_number,home_team=team_name)) %>%
+      left_join(select(team_df,away=team_number,away_team=team_name)) %>%
+      mutate(winner = ifelse(is.na(winner),'TBD',winner),
+             loser = ifelse(is.na(loser),'TBD',loser))
+  }
+  
   
   #############################
   ########### Get Full Schedule
@@ -28,7 +54,24 @@ get_espn_data = function(){
   # Create Game List
   print('Parse NFL Schedule Data')
   all_games=NULL
+  full_schedule = NULL
   for(ev in gms$events){
+    
+    temp_short_game = tibble(
+      season = ev$season$year,
+      season_type = ev$season$type,
+      season_name = ev$season$slug,
+      season_week = ev$week$number,
+      game_week = ev$week$number,
+      espn_id = ev$id,
+      unique_id = 'temp',
+      date_time = ev$date,
+      date = ev$date,
+      game_short_name = ev$shortName,
+      game_long_name = ev$name) %>%
+      mutate(date_time = as.POSIXct(date_time, format = "%Y-%m-%dT%H:%MZ", tz = "UTC"),
+             date_time = as_datetime(date_time, tz = "America/New_York"),
+             date = as.Date(date_time))
      
       # Filter for completed games only
       print(ev$shortName)
@@ -87,6 +130,7 @@ get_espn_data = function(){
       
       all_games = bind_rows(temp_game,all_games)
       }
+      full_schedule = bind_rows(full_schedule,temp_short_game)
   }
     
   
@@ -99,12 +143,13 @@ get_espn_data = function(){
     distinct(unique_id,.keep_all = T) %>% 
     arrange(date_time)
   s3saveRDS(new_game_details,bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
-  s3write_using(
-    x = new_game_details,
-    FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
-    object = "nfl_espn_database/game_schedule/full_espn_game_sch.parquet",   # key within the bucket
-    bucket = s3_bucket
-  )
+  s3_csv_save(new_game_details,path= 'nfl_espn_database/game_schedule/full_espn_game_sch.csv')
+  # s3write_using(
+  #   x = new_game_details,
+  #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+  #   object = "nfl_espn_database/game_schedule/full_espn_game_sch.parquet",   # key within the bucket
+  #   bucket = s3_bucket
+  # )
   
 
   # Create a clean schedule with consolidated team names
@@ -132,9 +177,16 @@ get_espn_data = function(){
     arrange(date_time)
   
   s3_csv_save(schedule,path='admin/clean_schedule.csv')
+  
+  s3_csv_save(full_schedule,path='admin/full_schedule.csv')
 
   
-  
+  week_number = full_schedule %>%
+    filter(date<= Sys.Date(),
+           season_name != 'preseason') %>%
+    arrange(desc(date))
+  week_number = ifelse(nrow(week_number)==0,1,week_number$season_week[1])
+  s3saveRDS(week_number,bucket = s3_bucket, object = 'admin/current_week.rds')
  
   
   #############################
@@ -203,13 +255,14 @@ get_espn_data = function(){
     
     nrow(all_tm_stats)
     s3_csv_save(all_tm_stats,path=paste0(path,'/inputs/',gm_unq_id,'_game_stats.csv'))
-    s3write_using(
-      x = all_tm_stats,
-      FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
-      object = paste0(gsub('PLACEHOLDER','team_stats',db_path),'_team_stats.parquet'),   
-      bucket = s3_bucket
-    )
-    
+    s3_csv_save(all_tm_stats,path= paste0(gsub('PLACEHOLDER','team_stats',db_path),'_team_stats.csv'))
+    # s3write_using(
+    #   x = all_tm_stats,
+    #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+    #   object = paste0(gsub('PLACEHOLDER','team_stats',db_path),'_team_stats.parquet'),   
+    #   bucket = s3_bucket
+    # )
+    # 
     #########################################
     ## 1. Get player Statistics from the game
     
@@ -246,12 +299,13 @@ get_espn_data = function(){
     
     nrow(all_play_stats)
     s3_csv_save(all_play_stats,path=paste0(path,'/inputs/',gm_unq_id,'_player_stats.csv'))
-    s3write_using(
-      x = all_play_stats,
-      FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
-      object = paste0(gsub('PLACEHOLDER','player_stats',db_path),'_player_stats.parquet'),   
-      bucket = s3_bucket
-    )
+    s3_csv_save(all_play_stats,path= paste0(gsub('PLACEHOLDER','player_stats',db_path),'_player_stats.csv'))
+    # s3write_using(
+    #   x = all_play_stats,
+    #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+    #   object = paste0(gsub('PLACEHOLDER','player_stats',db_path),'_player_stats.parquet'),   
+    #   bucket = s3_bucket
+    # )
     
     #######################################
     ## 3. Get Drive and Play by Play Data
@@ -317,20 +371,21 @@ get_espn_data = function(){
     nrow(all_drives)
     s3_csv_save(all_drives,path=paste0(path,'/inputs/',gm_unq_id,'_drive_report.csv'))
     s3_csv_save(pbp_all,path=paste0(path,'/inputs/',gm_unq_id,'_play_by_play.csv'))
-    
-    s3write_using(
-      x = all_drives,
-      FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
-      object = paste0(gsub('PLACEHOLDER','drive_report',db_path),'_drive_report.parquet'),   
-      bucket = s3_bucket
-    )
+    s3_csv_save(all_drives,path=paste0(gsub('PLACEHOLDER','drive_report',db_path),'_drive_report.csv'))
+    s3_csv_save(pbp_all,path=paste0(gsub('PLACEHOLDER','play_by_play',db_path),'_play_by_play.csv'))
+    # s3write_using(
+    #   x = all_drives,
+    #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+    #   object = paste0(gsub('PLACEHOLDER','drive_report',db_path),'_drive_report.parquet'),   
+    #   bucket = s3_bucket
+    # )
 
-    s3write_using(
-      x = pbp_all,
-      FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
-      object = paste0(gsub('PLACEHOLDER','play_by_play',db_path),'_play_by_play.parquet'),   
-      bucket = s3_bucket
-    )
+    # s3write_using(
+    #   x = pbp_all,
+    #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+    #   object = paste0(gsub('PLACEHOLDER','play_by_play',db_path),'_play_by_play.parquet'),   
+    #   bucket = s3_bucket
+    # )
 
     
     #######################################
@@ -352,12 +407,13 @@ get_espn_data = function(){
         bucket = s3_bucket,
         object = paste0(path,'/outputs/',gm_unq_id,'_game_recap.json')
       )
-      s3write_using(
-        x = game_recap,
-        FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
-        object = paste0(gsub('PLACEHOLDER','game_recap',db_path),'_game_recap.json'),   
-        bucket = s3_bucket
-      )
+     
+      # s3write_using(
+      #   x = game_recap,
+      #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
+      #   object = paste0(gsub('PLACEHOLDER','game_recap',db_path),'_game_recap.json'),   
+      #   bucket = s3_bucket
+      # )
       
     }
   }

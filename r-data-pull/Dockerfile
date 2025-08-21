@@ -23,7 +23,7 @@ RUN dnf -y install openssl-devel libxml2-devel libjpeg-turbo-devel libpng-devel
 RUN dnf -y install bzip2 xz lz4 zstd brotli # for Arrow
 
 # Install R packages
-RUN Rscript -e "install.packages(c('lambdr','jsonlite','httr','nflfastR','lubirdate','arrow'), repos = 'https://cloud.r-project.org/')"
+RUN Rscript -e "install.packages(c('lambdr','jsonlite','httr','nflfastR','lubirdate'), repos = 'https://cloud.r-project.org/')"
 RUN Rscript -e "install.packages(c('tableHTML','readr','aws.s3','dplyr','tidyr','rvest'), repos = 'https://cloud.r-project.org/')"
 
 # Copy R files to Lambda task root

@@ -44,9 +44,9 @@ lambda_manager <- function(lambda_input = list(msg='default')){
   ### Get Fantasy Data
   if(lambda_input$msg == 'get_fantasy'){
     
-    print('Fetching Daily ESPN grab')
-    source('get_fantasy_data.R')
-    exec_func(get_fantasy_data)
+    print('Fetching Real-Time Fantasy Data')
+    week_number = s3readRDS(bucket = s3_bucket, object = 'admin/current_week.rds')
+    espn_fantasy_loop(week_number)
     return('In Game Fantasy Completed')
     
   }
