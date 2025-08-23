@@ -3,6 +3,10 @@
 *.d.ts
 node_modules
 
+# OS files
+*.DS_Store*
+*.Rhistory*
+
 # CDK asset staging directory
 .cdk.staging
 cdk.out

@@ -4,14 +4,14 @@
 # Date: 8/17/2025
 # Author: Anthony Trevisan
 # Notes:
-# ToDo: Database setup, HAR auto, validate pulls, determine winner/loser, cleanup/comment, set live updates, PBP pass/Rush/rec
+# ToDo: validate data saves, determine winner/loser, cleanup/comment, set live updates, PBP pass/Rush/rec (database and then tool to query)
 ###########################
 
 
 profile = 'nfl'
 setwd('~/Coding/git_repos/nfl-data-manager/r-data-pull')
 Sys.setenv(AWS_PROFILE = profile, AWS_REGION = 'us-east-1')
-
+library(jsonlite)
 
 
 # Read the most recent cache file
@@ -32,15 +32,51 @@ Sys.setenv(
 source('nfl_helpers.R')
 
 
+###### Get token saved
+# from MM - JT
+espn_har = read_json('/Users/tonytrevisan/Downloads/fantasy.espn.com.har')
+for(req in espn_har$log$entries){
+  
+  if(grepl('131217621',req$request$url)){
+    m_req = req
+  }
+  
+}
+for(hd in m_req$request$headers){
+  
+  if(hd$name == 'Cookie'){
+    e_token = hd$value
+  }
+  
+}
 
 
+
+pbp <- nflfastR::load_pbp(2024)
+pbp %>%
+  filter(!is.na(passer_id))
+nflfastR::fast_scraper_roster(2024)
+
+
+
+vec = strsplit(e_token,';')[[1]]
+
+espn_2 = vec[grepl('espn_s2',vec)]
+swid = vec[grepl('SWID',vec)]
+espn_login = list(espn_2 = espn_2, swid = swid)
+aws.s3::s3saveRDS(espn_login, bucket = s3_bucket, object = 'fantasy_data/espn_login.rds')
+
+
+#### Done saving token
+
+s3 = paws::s3()
 
 get_s3_listing <- function(bucket, prefix) {
   token <- NULL
   rows  <- list()
   
   repeat {
-    resp <- chk$list_objects_v2(Bucket = bucket, Prefix = prefix,
+    resp <- s3$list_objects_v2(Bucket = bucket, Prefix = prefix,
                                 ContinuationToken = token)
     
     if (!is.null(resp$KeyCount)) message("Fetched: ", resp$KeyCount, " keys")
@@ -55,7 +91,8 @@ get_s3_listing <- function(bucket, prefix) {
           week   = vec[4],
           game   = vec[5],
           inout  = vec[6],
-          file   = vec[7]
+          file   = vec[7],
+          path = obj$Key,
         )
       })
       rows <- c(rows, page)
@@ -71,7 +108,35 @@ get_s3_listing <- function(bucket, prefix) {
 
 lst <- get_s3_listing(s3_bucket, "nfl_espn_data/")
 
+db_path = paste('nfl_espn_database','PLACEHOLDER',
+                paste0('nfl_season=',filt_df$season[rn]),
+                paste0('nfl_season_type=',filt_df$season_name[rn]),
+                paste0('nfl_week=',week_text),gm_unq_id,sep='/')
+s3_csv_save(all_tm_stats,path= paste0(gsub('PLACEHOLDER','team_stats',db_path),'_team_stats.csv'))
 
+lst$database = lst$path
+
+lst %>%
+  mutate(top_folder = case_when(grepl('drive_report',file) ~ 'drive_report',
+                                grepl('game_stats',file) ~ 'team_stats',
+                                grepl('play_by_play',file) ~ 'play_by_play',
+                                grepl('player_stats',file) ~ 'player_stats',
+                                TRUE ~ 'OTHER'),
+         database = paste('nfl_espn_database',top_folder,gsub('season_','nfl_season=',season),
+                          paste0('nfl_season_type=',stype),paste0('nfl_week=',week),file,sep='/')) %>%
+  filter(top_folder != 'OTHER') -> copy_over
+
+for(co in 9895:nrow(copy_over)){
+  
+ print(co)
+
+
+aws.s3::copy_object(from_object = copy_over$path[co],to_object = copy_over$database[co],
+                    from_bucket = s3_bucket, to_bucket = s3_bucket)
+
+}
+
+distinct(lst,game)
 lst %>%
   rename(file_nm = file) %>%
   mutate(
@@ -81,9 +146,46 @@ lst %>%
 
 
 upd %>% 
+  filter(season>'season_2011') %>%
   group_by(season,game) %>%
-  mutate(ct=n()) %>% filter(ct==5) %>% group_by(season) %>% summarise(ct=n())
-  summarise(mx = max(ct), mn = min(ct))
+  mutate(ct=n()) %>% filter(ct==5) -> missing_recaps
+
+
+espn_game_details %>%
+  filter((unique_id %in% missing_recaps$game)) -> miss_recap
+
+
+for(g in c(1:nrow(miss_recap))){
+  Sys.sleep(.5)
+  print('Start')
+  print(g)
+  gm_espn_id = miss_recap$espn_id[g]
+  gm_unq_id = miss_recap$unique_id[g]
+  
+text_recap = get_espn_recap(gm_espn_id)
+
+if(!grepl('No recap text found',text_recap)){
+  print('success')
+  print(g)
+  
+  game_recap = list(espn_id = gm_espn_id,
+                    unique_id = gm_unq_id,
+                    article = text_recap)
+  s3write_using(
+    FUN = function(obj, file) {
+      write_json(obj, path = file, pretty = TRUE, auto_unbox = TRUE)
+    },
+    x = game_recap,
+    bucket = s3_bucket,
+    object = paste0(path,'/outputs/',gm_unq_id,'_game_recap.json')
+  )
+  
+  
+}
+}
+
+
+
 
 lst %>% group_by(season) %>% summarise(ct = n())
 espn_game_details %>%

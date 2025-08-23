@@ -220,7 +220,7 @@ get_espn_data = function(){
     db_path = paste('nfl_espn_database','PLACEHOLDER',
                     paste0('nfl_season=',filt_df$season[rn]),
                     paste0('nfl_season_type=',filt_df$season_name[rn]),
-                    paste0('nfl_week=',week_text),gm_unq_id,sep='/')
+                    paste0('nfl_week=week_',week_text),gm_unq_id,sep='/')
     
     # Save current game as a json 
     s3write_using(
@@ -393,6 +393,8 @@ get_espn_data = function(){
     
     ### OUTPUTS
     print('Get End of Game Recap')
+    
+    
     if(!is.null(gm_summary$article$story)){
       game_recap = list(espn_id = gm_espn_id,
                         unique_id = gm_unq_id,
@@ -415,11 +417,32 @@ get_espn_data = function(){
       #   bucket = s3_bucket
       # )
       
+    } else {
+      
+      text_recap = get_espn_recap(gm_espn_id)
+      
+      if(!grepl('No recap text found',text_recap)){
+        
+        
+        game_recap = list(espn_id = gm_espn_id,
+                          unique_id = gm_unq_id,
+                          article = text_recap)
+        s3write_using(
+          FUN = function(obj, file) {
+            write_json(obj, path = file, pretty = TRUE, auto_unbox = TRUE)
+          },
+          x = game_recap,
+          bucket = s3_bucket,
+          object = paste0(path,'/outputs/',gm_unq_id,'_game_recap.json')
+        )
+        
+        
+      }
+      
+      
     }
+    
   }
-  
-  
-  
   
 }
 

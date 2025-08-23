@@ -338,3 +338,42 @@ espn_fantasy_loop = function(periods = c(1:12)){
 }
 
 
+
+### Pull Recap Manually
+get_espn_recap <- function(game_id) {
+  url <- paste0("https://www.espn.com/nfl/recap?gameId=", game_id)
+  #url = game_id
+  
+  page <- httr::GET(url, httr::user_agent("Mozilla/5.0"))
+  html <- read_html(page)
+  
+  # Extract the title from <title> tag in <head>
+  title_text <- html %>%
+    html_element("title") %>%
+    html_text2() %>%
+    sub(" - ESPN.*", "", .)  # Remove trailing " - ESPN"
+  
+  # Try <article> first
+  article_node <- html_element(html, "article")
+  
+  if (!is.na(article_node)) {
+    # If <article> exists, get <p> inside
+    recap_paragraphs <- article_node %>%
+      html_elements("p") %>%
+      html_text2()
+  } else {
+    # Fallback: Try all <p> tags and filter
+    all_paragraphs <- html %>% html_elements("p") %>% html_text2()
+    recap_paragraphs <- all_paragraphs[nchar(all_paragraphs) > 50]
+  }
+  
+  if (length(recap_paragraphs) == 0) {
+    return("⚠️ No recap text found.")
+  }
+  
+  # Combine title and recap body
+  full_text <- paste0("**", title_text, "**\n\n", paste(recap_paragraphs, collapse = "\n\n"))
+  return(full_text)
+}
+
+

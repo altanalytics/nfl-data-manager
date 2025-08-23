@@ -82,10 +82,6 @@ get_fantasy_data = function(){
     print(n=50)
   
   
- 
-  
-
-  
   
   
   
