@@ -124,7 +124,7 @@ get_espn_data = function(){
       ) %>% mutate(date_time = as.POSIXct(date_time, format = "%Y-%m-%dT%H:%MZ", tz = "UTC"),
                    date_time = as_datetime(date_time, tz = "America/New_York"),
                    date = as.Date(date_time),
-                   game_week = ifelse(season_type == 1,game_week-6,ifelse(season_type==3,game_week+20,game_week)),
+                   game_week = ifelse(season_type == 1,game_week-6,ifelse(season_type==3,game_week+18,game_week)),
                    unique_id = paste(season,season_type,ifelse(season_week<10,paste0(0,season_week),season_week),
                                      team_1_abbreviation,team_2_abbreviation,sep='_'))
       
@@ -187,15 +187,24 @@ get_espn_data = function(){
     arrange(desc(date))
   week_number = ifelse(nrow(week_number)==0,1,week_number$season_week[1])
   s3saveRDS(week_number,bucket = s3_bucket, object = 'admin/current_week.rds')
- 
+  
+  ###Get PBP Schedule
+  nfl_r_sched = nflfastR::fast_scraper_schedules()
+  new_game_details %>%
+    filter(season_name != 'preseason',!grepl('pro bowl',tolower(game_description))) %>%
+    select(season,season_name,season_week,espn_id,unique_id,date) %>%
+    inner_join(select(nfl_r_sched,espn_id=espn, pbp_game_id=game_id)) -> pbp_espn_sched
+  s3_csv_save(pbp_espn_sched,path='admin/pbp_espn_map.csv')
+  
+  
+  
   
   #############################
   ########### Get Game Details
   #############################
   
   filt_df = new_game_details %>%
-    filter(date > Sys.Date()-3)
-  
+    filter(date >= Sys.Date()-3)
   
   
   for(rn in 1:nrow(filt_df)){
@@ -217,11 +226,8 @@ get_espn_data = function(){
     gm_summary = content(gm_summary)  
     path = paste('nfl_espn_data',paste0('season_',filt_df$season[rn]),filt_df$season_name[rn],
                  paste0('week_',week_text),gm_unq_id,sep='/')
-    db_path = paste('nfl_espn_database','PLACEHOLDER',
-                    paste0('nfl_season=',filt_df$season[rn]),
-                    paste0('nfl_season_type=',filt_df$season_name[rn]),
-                    paste0('nfl_week=week_',week_text),gm_unq_id,sep='/')
-    
+    db_path = paste('PLACEHOLDER',paste0('nfl_season=',filt_df$season[rn]),gm_unq_id,sep='/')
+
     # Save current game as a json 
     s3write_using(
       FUN = function(obj, file) {
@@ -255,7 +261,7 @@ get_espn_data = function(){
     
     nrow(all_tm_stats)
     s3_csv_save(all_tm_stats,path=paste0(path,'/inputs/',gm_unq_id,'_game_stats.csv'))
-    s3_csv_save(all_tm_stats,path= paste0(gsub('PLACEHOLDER','team_stats',db_path),'_team_stats.csv'))
+    s3_csv_save(all_tm_stats,path= paste0(gsub('PLACEHOLDER','team_stats',db_path),'_team_stats.csv'), bucket=s3_db)
     # s3write_using(
     #   x = all_tm_stats,
     #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
@@ -299,7 +305,7 @@ get_espn_data = function(){
     
     nrow(all_play_stats)
     s3_csv_save(all_play_stats,path=paste0(path,'/inputs/',gm_unq_id,'_player_stats.csv'))
-    s3_csv_save(all_play_stats,path= paste0(gsub('PLACEHOLDER','player_stats',db_path),'_player_stats.csv'))
+    s3_csv_save(all_play_stats,path= paste0(gsub('PLACEHOLDER','team_stats',db_path),'_player_stats.csv'), bucket=s3_db)
     # s3write_using(
     #   x = all_play_stats,
     #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
@@ -371,8 +377,9 @@ get_espn_data = function(){
     nrow(all_drives)
     s3_csv_save(all_drives,path=paste0(path,'/inputs/',gm_unq_id,'_drive_report.csv'))
     s3_csv_save(pbp_all,path=paste0(path,'/inputs/',gm_unq_id,'_play_by_play.csv'))
-    s3_csv_save(all_drives,path=paste0(gsub('PLACEHOLDER','drive_report',db_path),'_drive_report.csv'))
-    s3_csv_save(pbp_all,path=paste0(gsub('PLACEHOLDER','play_by_play',db_path),'_play_by_play.csv'))
+    s3_csv_save(all_drives,path= paste0(gsub('PLACEHOLDER','team_stats',db_path),'_drive_report.csv'), bucket=s3_db)
+    s3_csv_save(pbp_all,path= paste0(gsub('PLACEHOLDER','team_stats',db_path),'_play_by_play.csv'), bucket=s3_db)
+
     # s3write_using(
     #   x = all_drives,
     #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
@@ -441,6 +448,98 @@ get_espn_data = function(){
       
       
     }
+    
+  }
+  
+  #############################
+  ########### Get PBP Stats
+  #############################
+
+  
+  pbp_filt = pbp_espn_sched %>% 
+    filter(date  >= Sys.Date()-3)
+
+  
+  # Catalog PBP Stats
+  if(nrow(pbp_filt)>0){
+    
+    cur_pbp <- nflfastR::load_pbp(max(pbp_filt$season)) %>%
+      filter(game_id %in% pbp_filt$pbp_game_id)
+    plyrs = nflfastR::fast_scraper_roster(max(pbp_filt$season))
+    all_plyers = plyrs %>%
+      select(player_id=gsis_id,full_name,first_name,last_name) %>%
+      distinct(player_id, .keep_all = T)
+    
+    for(gm in pbp_filt$pbp_game_id){
+      
+      
+        print(gm)
+        
+        all_sch = filter(pbp_filt,pbp_game_id == gm)
+        gm_unq_id = all_sch$unique_id
+        pbp_id = all_sch$pbp_game_id
+        week_text = all_sch$season_week
+        week_text = ifelse(week_text<10,paste0('0',week_text),week_text)
+        db_path = paste('PLACEHOLDER',paste0('nfl_season=',all_sch$season),gm_unq_id,sep='/')
+        
+        
+        temp=pbp %>%
+          filter(game_id==pbp_id)
+        
+        passing_pbp = temp %>%
+          filter(play_type == 'pass') %>%
+          mutate(throw_yards = air_yards,
+                 air_yards = ifelse(success==0,0,air_yards),
+                 play_result = case_when(interception == 1 ~ 'INTERCEPTION',
+                                         success==0 & fumble != 1 ~ 'INCOMPLETE',
+                                         success==1 & touchdown == 1 ~ 'TOUCHDOWN',
+                                         TRUE ~'COMPLETE'),
+                 yards_after_catch = ifelse(is.na(yards_after_catch),0,yards_after_catch)) %>%
+          select(temp,game_id,posteam,player_id=passer_id,down,ydstogo,play_type:yards_after_catch,
+                 throw_yards,play_result,play_type_nfl,fumble,touchdown,interception,success,desc) %>%
+          left_join(all_plyers)
+        s3_csv_save(passing_pbp,path= paste0(gsub('PLACEHOLDER','pbp_stats_passing',db_path),'_pbp_stats_passing.csv'))
+        
+        
+        receiving_pbp = temp %>%
+          filter(play_type == 'pass') %>%
+          mutate(throw_yards = air_yards,
+                 air_yards = ifelse(success==0,0,air_yards),
+                 play_result = case_when(interception == 1 ~ 'INTERCEPTION',
+                                         success==0 & fumble != 1 ~ 'INCOMPLETE',
+                                         success==1 & touchdown == 1 ~ 'TOUCHDOWN',
+                                         TRUE ~'COMPLETE'),
+                 yards_after_catch = ifelse(is.na(yards_after_catch),0,yards_after_catch)) %>%
+          filter(play_result %in% c('COMPLETE','TOUCHDOWN')) %>%
+          select(temp,game_id,posteam,player_id=receiver_id,down,ydstogo,play_type:yards_after_catch,
+                 throw_yards,play_result,play_type_nfl,fumble,touchdown,interception,success,desc) %>%
+          left_join(all_plyers)
+        s3_csv_save(receiving_pbp,path= paste0(gsub('PLACEHOLDER','pbp_stats_receiving',db_path),'_pbp_stats_receiving.csv'))
+        
+        rushing_pbp = temp %>%
+          filter(play_type == 'run') %>%
+          mutate(throw_yards = air_yards,
+                 air_yards = ifelse(success==0,0,air_yards),
+                 play_result = case_when(interception == 1 ~ 'INTERCEPTION',
+                                         success==0 & fumble != 1 ~ 'INCOMPLETE',
+                                         success==1 & touchdown == 1 ~ 'TOUCHDOWN',
+                                         TRUE ~'COMPLETE'),
+                 yards_after_catch = ifelse(is.na(yards_after_catch),0,yards_after_catch)) %>%
+          filter(play_result %in% c('COMPLETE','TOUCHDOWN')) %>%
+          select(temp,game_id,posteam,player_id=rusher_id,down,ydstogo,play_type:qb_scramble,
+                 run_location,run_gap,,play_result,play_type_nfl,fumble,touchdown,interception,success,desc) %>%
+          left_join(all_plyers)
+        
+        s3_csv_save(rushing_pbp,path= paste0(gsub('PLACEHOLDER','pbp_stats_rushing',db_path),'_pbp_stats_rushing.csv'))
+        
+      }
+      
+      
+      
+      
+    }
+    
+    
     
   }
   

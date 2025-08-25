@@ -20,6 +20,7 @@ library(rvest)
 options(dplyr.width = Inf)
 
 s3_bucket = 'alt-nfl-bucket'
+s3_db = 'alt-nfl-database'
 ny_datetime = as_datetime(Sys.time(), tz = "America/New_York")
 
 team_df = aws.s3::s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_teams.csv') %>%

@@ -71,51 +71,137 @@ aws.s3::s3saveRDS(espn_login, bucket = s3_bucket, object = 'fantasy_data/espn_lo
 
 library(lubridate)
 library(dplyr)
-pbp <- nflfastR::load_pbp(2023:2024)
-schedule = pbp %>% 
-  mutate(season = year(as.Date(game_date)-90),
-         home_team = case_when(home_team == 'LA'~'LAR',
-                               home_team == 'SD'~'LAC',
-                               home_team == 'STL'~'LAR',
-                               home_team == 'WAS'~'WSH',
-                               home_team == 'OAK'~'LV',
-                               TRUE ~ home_team),
-         away_team = case_when(away_team == 'LA'~'LAR',
-                               away_team == 'SD'~'LAC',
-                               away_team == 'STL'~'LAR',
-                               away_team == 'WAS'~'WSH',
-                               away_team == 'OAK'~'LV',
-                               TRUE ~ away_team)) %>%
-  distinct(season,game_date,week,game_id,home_team,season_type,away_team,roof,
-           surface,home_coach,away_coach,game_stadium,weather) %>%
-  arrange(game_date)
+pbp <- nflfastR::load_pbp(2007:2024)
+plyrs = nflfastR::fast_scraper_roster(2007:2024)
+all_plyers = plyrs %>%
+  select(player_id=gsis_id,full_name,first_name,last_name) %>%
+  distinct(player_id, .keep_all = T)
 
+
+for(gm in pbp_espn_sched$pbp_game_id){
+  
+  print(gm)
+  
+  all_sch = filter(pbp_espn_sched,pbp_game_id == gm)
+  gm_unq_id = all_sch$unique_id
+  pbp_id = all_sch$pbp_game_id
+  week_text = all_sch$season_week
+  week_text = ifelse(week_text<10,paste0('0',week_text),week_text)
+  db_path = paste('PLACEHOLDER',
+                  paste0('nfl_season=',all_sch$season),gm_unq_id,sep='/')
+  
+  
+  temp=pbp %>%
+    filter(game_id==pbp_id)
+  
+  passing_pbp = temp %>%
+    filter(play_type == 'pass') %>%
+    mutate(throw_yards = air_yards,
+           air_yards = ifelse(success==0,0,air_yards),
+           play_result = case_when(interception == 1 ~ 'INTERCEPTION',
+                                   success==0 & fumble != 1 ~ 'INCOMPLETE',
+                                   success==1 & touchdown == 1 ~ 'TOUCHDOWN',
+                                   TRUE ~'COMPLETE'),
+           yards_after_catch = ifelse(is.na(yards_after_catch),0,yards_after_catch)) %>%
+    select(temp,game_id,posteam,player_id=passer_id,down,ydstogo,play_type:yards_after_catch,
+           throw_yards,play_result,play_type_nfl,fumble,touchdown,interception,success,desc) %>%
+    left_join(all_plyers)
+  s3_csv_save(passing_pbp,path= paste0(gsub('PLACEHOLDER','pbp_stats_passing',db_path),'_pbp_stats_passing.csv'),
+              bucket = s3_db)
+  
+  
+  receiving_pbp = temp %>%
+    filter(play_type == 'pass') %>%
+    mutate(throw_yards = air_yards,
+           air_yards = ifelse(success==0,0,air_yards),
+           play_result = case_when(interception == 1 ~ 'INTERCEPTION',
+                                   success==0 & fumble != 1 ~ 'INCOMPLETE',
+                                   success==1 & touchdown == 1 ~ 'TOUCHDOWN',
+                                   TRUE ~'COMPLETE'),
+           yards_after_catch = ifelse(is.na(yards_after_catch),0,yards_after_catch)) %>%
+    filter(play_result %in% c('COMPLETE','TOUCHDOWN')) %>%
+    select(temp,game_id,posteam,player_id=receiver_id,down,ydstogo,play_type:yards_after_catch,
+           throw_yards,play_result,play_type_nfl,fumble,touchdown,interception,success,desc) %>%
+    left_join(all_plyers)
+  s3_csv_save(receiving_pbp,path= paste0(gsub('PLACEHOLDER','pbp_stats_receiving',db_path),'_pbp_stats_receiving.csv'),
+              bucket = s3_db)
+  
+  rushing_pbp = temp %>%
+    filter(play_type == 'run') %>%
+    mutate(throw_yards = air_yards,
+           air_yards = ifelse(success==0,0,air_yards),
+           play_result = case_when(interception == 1 ~ 'INTERCEPTION',
+                                   success==0 & fumble != 1 ~ 'INCOMPLETE',
+                                   success==1 & touchdown == 1 ~ 'TOUCHDOWN',
+                                   TRUE ~'COMPLETE'),
+           yards_after_catch = ifelse(is.na(yards_after_catch),0,yards_after_catch)) %>%
+    filter(play_result %in% c('COMPLETE','TOUCHDOWN')) %>%
+    select(temp,game_id,posteam,player_id=rusher_id,down,ydstogo,play_type:qb_scramble,
+           run_location,run_gap,,play_result,play_type_nfl,fumble,touchdown,interception,success,desc) %>%
+    left_join(all_plyers)
+  
+  s3_csv_save(rushing_pbp,path= paste0(gsub('PLACEHOLDER','pbp_stats_rushing',db_path),'_pbp_stats_rushing.csv'),
+              bucket = s3_db)
+  
+}
+
+temp=pbp %>%
+  filter(season==2024,away_team=='WAS', grepl('touchdo',tolower(desc)))
+
+
+
+
+
+
+
+
+nfl_r_sched = nflfastR::fast_scraper_schedules()
+espn_df = s3readRDS(bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
+espn_df %>%
+  filter(season_name != 'preseason',!grepl('pro bowl',tolower(game_description))) %>%
+  select(season,season_name,season_week,espn_id,unique_id) %>%
+  left_join(select(nfl_r_sched,espn_id=espn, pbp_game_id=game_id)) -> pbp_espn_sched
+
+
+
+
+gm_df %>% 
+  as.data.frame() %>%
+  as_tibble() %>%
+  mutate(home_team_abbrv = case_when(team_1_abbreviation == 'LA'~'LAR',
+                                     team_1_abbreviation == 'SD'~'LAC',
+                                     team_1_abbreviation == 'STL'~'LAR',
+                                     team_1_abbreviation == 'WAS'~'WSH',
+                                     team_1_abbreviation == 'OAK'~'LV',
+                                     TRUE ~ team_1_abbreviation),
+         away_team_abbrv = case_when(team_2_abbreviation == 'LA'~'LAR',
+                                     team_2_abbreviation == 'SD'~'LAC',
+                                     team_2_abbreviation == 'STL'~'LAR',
+                                     team_2_abbreviation == 'WAS'~'WSH',
+                                     team_2_abbreviation == 'OAK'~'LV',
+                                     TRUE ~ team_2_abbreviation)) -> gm_final
 
 gm_df %>%
-  mutate(week = ifelse(type=='post-season' & season <2021,week+17,
-                       ifelse(type == 'post-season', week+18, week)),
-         home_team_abbrv = case_when(home_team_abbrv == 'LA'~'LAR',
-                                     home_team_abbrv == 'SD'~'LAC',
-                                     home_team_abbrv == 'STL'~'LAR',
-                                     home_team_abbrv == 'WAS'~'WSH',
-                                     home_team_abbrv == 'OAK'~'LV',
-                                     TRUE ~ home_team_abbrv),
-         away_team_abbrv = case_when(away_team_abbrv == 'LA'~'LAR',
-                                     away_team_abbrv == 'SD'~'LAC',
-                                     away_team_abbrv == 'STL'~'LAR',
-                                     away_team_abbrv == 'WAS'~'WSH',
-                                     away_team_abbrv == 'OAK'~'LV',
-                                     TRUE ~ away_team_abbrv)) -> gm_final
-distinct(week,home_team_abbrv)
+  filter(season_name=='post-season') %>%
+  group_by(game_week) %>%
+  summarise(ct=n())
+schedule %>% filter(reg_post!='REG') %>% group_by(week) %>% summarise(ct=n())
 
+gm_df %>% filter(season==2008,team_1_abbreviation=='ARI') %>%tail
 mrgd_df = schedule %>%
+  filter(season>2007) %>%
   mutate(week = ifelse(month(game_date)==2,week+1,week)) %>%
-  rename(pbp_game_id = game_id, home_team_abbrv = home_team, away_team_abbrv = away_team) %>%
-  inner_join(rename(gm_final,espn_id = id)) 
+  rename(pbp_game_id = game_id, home_team_abbrv = home_team, away_team_abbrv = away_team,game_week=week) %>%
+  left_join(gm_final) 
+
+mrgd_df %>% filter(is.na(team_2_final_score))
+
+mrgd_df %>%
+  filter(season==2024,month(date)==2)
 
 
 
-
+gm_final %>% filter(grepl('post',season_name))
 
 pbp <- nflfastR::load_pbp(2024)
 pbp %>%
@@ -163,11 +249,11 @@ get_s3_listing <- function(bucket, prefix) {
 
 lst <- get_s3_listing(s3_bucket, "nfl_espn_data/")
 
-db_path = paste('nfl_espn_database','PLACEHOLDER',
-                paste0('nfl_season=',filt_df$season[rn]),
-                paste0('nfl_season_type=',filt_df$season_name[rn]),
-                paste0('nfl_week=',week_text),gm_unq_id,sep='/')
-s3_csv_save(all_tm_stats,path= paste0(gsub('PLACEHOLDER','team_stats',db_path),'_team_stats.csv'))
+# db_path = paste('nfl_espn_database','PLACEHOLDER',
+#                 paste0('nfl_season=',filt_df$season[rn]),
+#                 paste0('nfl_season_type=',filt_df$season_name[rn]),
+#                 paste0('nfl_week=',week_text),gm_unq_id,sep='/')
+# s3_csv_save(all_tm_stats,path= paste0(gsub('PLACEHOLDER','team_stats',db_path),'_team_stats.csv'))
 
 lst$database = lst$path
 
@@ -177,17 +263,16 @@ lst %>%
                                 grepl('play_by_play',file) ~ 'play_by_play',
                                 grepl('player_stats',file) ~ 'player_stats',
                                 TRUE ~ 'OTHER'),
-         database = paste('nfl_espn_database',top_folder,gsub('season_','nfl_season=',season),
-                          paste0('nfl_season_type=',stype),paste0('nfl_week=',week),file,sep='/')) %>%
+         database = paste(top_folder,gsub('season_','nfl_season=',season),file,sep='/')) %>%
   filter(top_folder != 'OTHER') -> copy_over
 
-for(co in 9895:nrow(copy_over)){
+for(co in 8495:nrow(copy_over)){
   
  print(co)
 
 
 aws.s3::copy_object(from_object = copy_over$path[co],to_object = copy_over$database[co],
-                    from_bucket = s3_bucket, to_bucket = s3_bucket)
+                    from_bucket = s3_bucket, to_bucket = 'alt-nfl-database')
 
 }
 
