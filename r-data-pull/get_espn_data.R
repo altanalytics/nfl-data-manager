@@ -12,7 +12,7 @@ get_espn_data = function(){
   
   # Get Existing ESPN Game details
   espn_game_details = s3readRDS(bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
-  library(arrow)
+
   
   #############################
   ########### Get Daily Fantasy Data 

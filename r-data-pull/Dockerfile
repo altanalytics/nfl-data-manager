@@ -31,7 +31,7 @@ COPY *.R ${LAMBDA_TASK_ROOT}/
 RUN chmod 755 -R ${LAMBDA_TASK_ROOT}/
 
 # Create bootstrap script that calls the correct R file
-RUN printf '#!/bin/sh\ncd /lambda\nRscript nfl_lambda_func.R' > /var/runtime/bootstrap \
+RUN printf '#!/bin/sh\nRscript ${LAMBDA_TASK_ROOT}/nfl_lambda_func.R' > /var/runtime/bootstrap \
   && chmod +x /var/runtime/bootstrap
 
 CMD ["lambda_manager"]

@@ -29,11 +29,21 @@ Sys.setenv(
   AWS_SESSION_TOKEN = cache_data$Credentials$SessionToken
 )
 
+
 source('nfl_helpers.R')
+
+# env_lines <- c(
+#   paste0("AWS_ACCESS_KEY_ID=", cache_data$Credentials$AccessKeyId),
+#   paste0("AWS_SECRET_ACCESS_KEY=", cache_data$Credentials$SecretAccessKey),
+#   paste0("AWS_SESSION_TOKEN=", cache_data$Credentials$SessionToken),
+#   paste0("AWS_REGION=us-east-1")
+# )
+# writeLines(env_lines, '/Users/tonytrevisan/Coding/git_repos/nfl-genai-tool/genai/docker.env')
+
 
 
 ###### Get token saved
-# from MM - JT
+# from MinivanMayhem 
 espn_har = read_json('/Users/tonytrevisan/Downloads/fantasy.espn.com.har')
 for(req in espn_har$log$entries){
   
@@ -50,15 +60,6 @@ for(hd in m_req$request$headers){
   
 }
 
-
-
-pbp <- nflfastR::load_pbp(2024)
-pbp %>%
-  filter(!is.na(passer_id))
-nflfastR::fast_scraper_roster(2024)
-
-
-
 vec = strsplit(e_token,';')[[1]]
 
 espn_2 = vec[grepl('espn_s2',vec)]
@@ -66,6 +67,60 @@ swid = vec[grepl('SWID',vec)]
 espn_login = list(espn_2 = espn_2, swid = swid)
 aws.s3::s3saveRDS(espn_login, bucket = s3_bucket, object = 'fantasy_data/espn_login.rds')
 
+
+
+library(lubridate)
+library(dplyr)
+pbp <- nflfastR::load_pbp(2023:2024)
+schedule = pbp %>% 
+  mutate(season = year(as.Date(game_date)-90),
+         home_team = case_when(home_team == 'LA'~'LAR',
+                               home_team == 'SD'~'LAC',
+                               home_team == 'STL'~'LAR',
+                               home_team == 'WAS'~'WSH',
+                               home_team == 'OAK'~'LV',
+                               TRUE ~ home_team),
+         away_team = case_when(away_team == 'LA'~'LAR',
+                               away_team == 'SD'~'LAC',
+                               away_team == 'STL'~'LAR',
+                               away_team == 'WAS'~'WSH',
+                               away_team == 'OAK'~'LV',
+                               TRUE ~ away_team)) %>%
+  distinct(season,game_date,week,game_id,home_team,season_type,away_team,roof,
+           surface,home_coach,away_coach,game_stadium,weather) %>%
+  arrange(game_date)
+
+
+gm_df %>%
+  mutate(week = ifelse(type=='post-season' & season <2021,week+17,
+                       ifelse(type == 'post-season', week+18, week)),
+         home_team_abbrv = case_when(home_team_abbrv == 'LA'~'LAR',
+                                     home_team_abbrv == 'SD'~'LAC',
+                                     home_team_abbrv == 'STL'~'LAR',
+                                     home_team_abbrv == 'WAS'~'WSH',
+                                     home_team_abbrv == 'OAK'~'LV',
+                                     TRUE ~ home_team_abbrv),
+         away_team_abbrv = case_when(away_team_abbrv == 'LA'~'LAR',
+                                     away_team_abbrv == 'SD'~'LAC',
+                                     away_team_abbrv == 'STL'~'LAR',
+                                     away_team_abbrv == 'WAS'~'WSH',
+                                     away_team_abbrv == 'OAK'~'LV',
+                                     TRUE ~ away_team_abbrv)) -> gm_final
+distinct(week,home_team_abbrv)
+
+mrgd_df = schedule %>%
+  mutate(week = ifelse(month(game_date)==2,week+1,week)) %>%
+  rename(pbp_game_id = game_id, home_team_abbrv = home_team, away_team_abbrv = away_team) %>%
+  inner_join(rename(gm_final,espn_id = id)) 
+
+
+
+
+
+pbp <- nflfastR::load_pbp(2024)
+pbp %>%
+  filter(!is.na(passer_id))
+nflfastR::fast_scraper_roster(2024)
 
 #### Done saving token
 
