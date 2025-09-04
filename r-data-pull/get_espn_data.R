@@ -143,7 +143,7 @@ get_espn_data = function(){
     distinct(unique_id,.keep_all = T) %>% 
     arrange(date_time)
   s3saveRDS(new_game_details,bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
-  s3_csv_save(new_game_details,path= 'nfl_espn_database/game_schedule/full_espn_game_sch.csv')
+  s3_csv_save(new_game_details,path= 'game_schedule/full_espn_game_sch.csv', bucket = s3_db)
   # s3write_using(
   #   x = new_game_details,
   #   FUN = function(x, file) write_parquet(x, file, compression = "snappy"),
@@ -177,6 +177,7 @@ get_espn_data = function(){
     arrange(date_time)
   
   s3_csv_save(schedule,path='admin/clean_schedule.csv')
+  s3_csv_save(schedule,path='clean_schedule/clean_schedule.csv', bucket = s3_db)
   
   s3_csv_save(full_schedule,path='admin/full_schedule.csv')
 
@@ -291,7 +292,7 @@ get_espn_data = function(){
                              athlete_name = x$athlete$displayName,
                              athlete_first = x$athlete$firstName,
                              athlete_last = x$athlete$lastName,
-                             athlete_jersey = x$athlete$jersey,
+                             # athlete_jersey = x$athlete$jersey,
                              stat_type = st$name,
                              stat_label = st_lbl,
                              stat_description = st_desc,
@@ -491,12 +492,14 @@ get_espn_data = function(){
           mutate(throw_yards = air_yards,
                  air_yards = ifelse(success==0,0,air_yards),
                  play_result = case_when(interception == 1 ~ 'INTERCEPTION',
-                                         success==0 & fumble != 1 ~ 'INCOMPLETE',
+                                         incomplete_pass == 1 ~ 'INCOMPLETE',
                                          success==1 & touchdown == 1 ~ 'TOUCHDOWN',
+                                         play_type_nfl == 'SACK' ~ 'SACK',
+                                         play_type_nfl == 'PAT2' ~ 'PAT2',
                                          TRUE ~'COMPLETE'),
                  yards_after_catch = ifelse(is.na(yards_after_catch),0,yards_after_catch)) %>%
-          select(temp,game_id,posteam,player_id=passer_id,down,ydstogo,play_type:yards_after_catch,
-                 throw_yards,play_result,play_type_nfl,fumble,touchdown,interception,success,desc) %>%
+          select(game_id,posteam,player_id=passer_id,down,ydstogo,play_type:yards_after_catch,
+                 throw_yards,play_result,play_type_nfl,fumble,touchdown,interception,success) %>%
           left_join(all_plyers)
         s3_csv_save(passing_pbp,path= paste0(gsub('PLACEHOLDER','pbp_stats_passing',db_path),'_pbp_stats_passing.csv'))
         
@@ -506,13 +509,15 @@ get_espn_data = function(){
           mutate(throw_yards = air_yards,
                  air_yards = ifelse(success==0,0,air_yards),
                  play_result = case_when(interception == 1 ~ 'INTERCEPTION',
-                                         success==0 & fumble != 1 ~ 'INCOMPLETE',
+                                         incomplete_pass == 1 ~ 'INCOMPLETE',
                                          success==1 & touchdown == 1 ~ 'TOUCHDOWN',
+                                         play_type_nfl == 'SACK' ~ 'SACK',
+                                         play_type_nfl == 'PAT2' ~ 'PAT2',
                                          TRUE ~'COMPLETE'),
                  yards_after_catch = ifelse(is.na(yards_after_catch),0,yards_after_catch)) %>%
           filter(play_result %in% c('COMPLETE','TOUCHDOWN')) %>%
-          select(temp,game_id,posteam,player_id=receiver_id,down,ydstogo,play_type:yards_after_catch,
-                 throw_yards,play_result,play_type_nfl,fumble,touchdown,interception,success,desc) %>%
+          select(game_id,posteam,player_id=receiver_id,down,ydstogo,play_type:yards_after_catch,
+                 throw_yards,play_result,play_type_nfl,fumble,touchdown,interception,success) %>%
           left_join(all_plyers)
         s3_csv_save(receiving_pbp,path= paste0(gsub('PLACEHOLDER','pbp_stats_receiving',db_path),'_pbp_stats_receiving.csv'))
         
@@ -526,8 +531,8 @@ get_espn_data = function(){
                                          TRUE ~'COMPLETE'),
                  yards_after_catch = ifelse(is.na(yards_after_catch),0,yards_after_catch)) %>%
           filter(play_result %in% c('COMPLETE','TOUCHDOWN')) %>%
-          select(temp,game_id,posteam,player_id=rusher_id,down,ydstogo,play_type:qb_scramble,
-                 run_location,run_gap,,play_result,play_type_nfl,fumble,touchdown,interception,success,desc) %>%
+          select(game_id,posteam,player_id=rusher_id,down,ydstogo,play_type:qb_scramble,
+                 run_location,run_gap,,play_result,play_type_nfl,fumble,touchdown,interception,success) %>%
           left_join(all_plyers)
         
         s3_csv_save(rushing_pbp,path= paste0(gsub('PLACEHOLDER','pbp_stats_rushing',db_path),'_pbp_stats_rushing.csv'))
