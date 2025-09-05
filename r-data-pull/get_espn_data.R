@@ -19,6 +19,10 @@ get_espn_data = function(){
   #############################
   
   if(weekdays(Sys.Date()) %in% c('Tuesday','Thursday','Saturday')){
+    
+    print('Calc schedule wins and losses')
+    calc_league_scores()
+    
     tms = espn_fantasy_loop(1:12)
     team_df = aws.s3::s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_teams.csv') %>%
       filter(!is.na(team_number))
@@ -207,7 +211,7 @@ get_espn_data = function(){
   filt_df = new_game_details %>%
     filter(date >= Sys.Date()-3)
   
-  
+  if(nrow(filt_df)>0){
   for(rn in 1:nrow(filt_df)){
     Sys.sleep(1)
     print(paste0('Row Number: ',rn))
@@ -451,6 +455,7 @@ get_espn_data = function(){
     }
     
   }
+}
   
   #############################
   ########### Get PBP Stats
@@ -548,5 +553,5 @@ get_espn_data = function(){
     
   }
   
-}
+
 

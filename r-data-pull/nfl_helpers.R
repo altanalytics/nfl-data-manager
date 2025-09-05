@@ -121,7 +121,7 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
   
   url = paste0('https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/',fant_yr,'/segments/0/leagues/',
                espn_league,'?scoringPeriodId=',espn_period,'&view=mRoster&view=mTeam&view=mBoxscore')
-  results = GET(url,add_headers('cookie'=paste0(espn_login$espn_2,espn_login$swid)))
+  results = GET(url,add_headers('cookie'=paste(espn_login$espn_2,espn_login$swid,sep=';')))
   espn_data = content(results)
   
   
@@ -235,6 +235,7 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
   }
   roster_df %>%
     mutate(unique_slot = row_number(),
+           actual = ifelse(is.na(actual),0,actual),
            projected_total = ifelse(upd_player_slot<20,projected,0),
            actual_total = ifelse(upd_player_slot<20,actual,0)) %>%
     ungroup() -> roster_df
@@ -377,4 +378,63 @@ get_espn_recap <- function(game_id) {
   return(full_text)
 }
 
+
+calc_league_scores = function(){
+  
+  week_number = s3readRDS(bucket = s3_bucket, object = 'admin/current_week.rds')-1
+  if(week_number==0){week_number = 1}
+  week_stack = NULL
+  for(wn in c(1:week_number)){
+    
+    week_df <- s3read_using(FUN=read_csv, bucket = s3_bucket, object = paste0('fantasy_data/week_',wn,'.csv'))
+    week_stack = rbind(week_stack,week_df)
+    
+  }
+  
+  weekly_res = week_stack %>%
+    filter(home_player == 'TOTAL') %>%
+    select(home = home_bbr_team_id, away = away_bbr_team_id,week,home_team,home_actual,away_team,away_actual)
+  
+  team_df <- s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_teams.csv')
+  schedule_df <- s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_schedule.csv') %>%
+    left_join(weekly_res) %>%
+    filter(home_actual != away_actual) %>%
+    mutate(home_points = home_actual,
+           away_points = away_actual,
+           home_actual = NULL,
+           away_actual = NULL,
+           winner = ifelse(home_points > away_points,home_team,away_team),
+           winner_points = ifelse(winner == home_team, home_points, away_points),
+           loser = ifelse(winner == home_team, away_team,home_team),
+           loser_points = ifelse(winner == home_team, away_points, home_points))
+  
+  s3write_using(schedule_df, write_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_schedule_results.csv')
+  
+  wins = schedule_df %>%
+    mutate(wins = 1,losses = 0) %>%
+    select(week,points=winner_points,team_name=winner,wins,losses)
+  
+  loss = schedule_df %>%
+    mutate(wins = 0,losses = 1) %>%
+    select(week,points=loser_points,team_name=loser,wins,losses)
+  
+  rbind(wins,loss) %>%
+    group_by(team_name) %>%
+    summarise(points = sum(points),
+              wins = sum(wins),
+              losses = sum(losses)) -> df_wl
+  
+  team_df <- s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_teams.csv')
+  team_df %>%
+    left_join(df_wl) %>%
+    mutate(in_wins = wins,
+           in_losses = losses,
+           total_points = points,
+           wins = NULL,
+           losses = NULL,
+           points = NULL) -> team_df_upd
+  
+  s3write_using(team_df_upd,FUN=write_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_teams.csv')
+  
+}
 
