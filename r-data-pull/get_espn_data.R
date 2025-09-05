@@ -19,11 +19,15 @@ get_espn_data = function(){
   #############################
   
   if(weekdays(Sys.Date()) %in% c('Tuesday','Thursday','Saturday')){
+    num_run = c(1:12)
+  } else {
+    num_run = s3readRDS(bucket = s3_bucket, object = 'admin/current_week.rds')
+  }
     
     print('Calc schedule wins and losses')
     calc_league_scores()
     
-    tms = espn_fantasy_loop(1:12)
+    tms = espn_fantasy_loop(num_run)
     team_df = aws.s3::s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_teams.csv') %>%
       filter(!is.na(team_number))
     
@@ -40,7 +44,7 @@ get_espn_data = function(){
       left_join(select(team_df,away=team_number,away_team=team_name)) %>%
       mutate(winner = ifelse(is.na(winner),'TBD',winner),
              loser = ifelse(is.na(loser),'TBD',loser))
-  }
+  
   
   
   #############################

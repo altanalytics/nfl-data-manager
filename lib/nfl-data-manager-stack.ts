@@ -52,7 +52,7 @@ export class NflDataManagerStack extends cdk.Stack {
       { 
         name: 'daily_data', 
         cron: events.Schedule.cron({ 
-          minute: '30', 
+          minute: '50', 
           hour: '12', 
           month: '1,2,8,9,10,11,12', 
           weekDay: '*', 
@@ -67,7 +67,7 @@ export class NflDataManagerStack extends cdk.Stack {
           minute: '0/10', 
           hour: '0-5', 
           month: '9-12', 
-          weekDay: 'MON,THUR,SUN', 
+          weekDay: 'MON,THUR,FRI,SUN', 
           year: '*' 
         }), 
         msg: { lambda_input: { msg: 'get_fantasy_night' } } 
