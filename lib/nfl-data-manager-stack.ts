@@ -67,7 +67,7 @@ export class NflDataManagerStack extends cdk.Stack {
           minute: '0/10', 
           hour: '0-5', 
           month: '9-12', 
-          weekDay: 'MON,THUR,FRI,SUN', 
+          weekDay: 'MON,TUE,FRI,SAT', 
           year: '*' 
         }), 
         msg: { lambda_input: { msg: 'get_fantasy_night' } } 

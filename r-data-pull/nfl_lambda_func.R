@@ -42,7 +42,7 @@ lambda_manager <- function(lambda_input = list(msg='default')){
   }
   
   ### Get Fantasy Data
-  if(lambda_input$msg == 'get_fantasy'){
+  if(lambda_input$msg %in% c('get_fantasy_day','get_fantasy_night')){
     
     print('Fetching Real-Time Fantasy Data')
     week_number = s3readRDS(bucket = s3_bucket, object = 'admin/current_week.rds')
