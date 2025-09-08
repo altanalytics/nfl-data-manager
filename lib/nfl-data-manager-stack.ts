@@ -75,7 +75,7 @@ export class NflDataManagerStack extends cdk.Stack {
       { 
         name: 'fantasy_data_day', 
         cron: events.Schedule.cron({ 
-          minute: '0/10', 
+          minute: '0/5', 
           hour: '17-23', 
           month: '9-12', 
           weekDay: 'SUN', 
