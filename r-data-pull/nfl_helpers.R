@@ -95,20 +95,15 @@ s3_csv_save = function(sv_df, path, bucket = 'alt-nfl-bucket', delim =','){
 
 
 # Tool to send R emails through SES
-send_r_email = function(subject, embody, sendto=c("tony@altanalyticsllc.com")){
+send_r_email = function(subject, embody, sendto="tony@altanalyticsllc.com"){
   
   
-  frm = 'NFL App <tony@altanalyticsllc.com>'
   
-  sendto = paste0(sendto,collapse = ' ')
-  # bcc = paste0(bcc,collapse = ' ')
   em_api = paste0('aws ses send-email ',
-                  '--from ',frm,' ',
-                  '--to ',sendto,' ',
-                  # '--bcc ',bcc,' ',
+                  '--from "ALT Alpaca Trading <tony@altanalyticsllc.com>" ',
+                  '--to "',sendto,'" ',
                   '--subject "',subject,'" ',
-                  "--html '",embody,"'")
-  
+                  "--html '",  gsub("'",'"',embody), "'")
   
   system(em_api)
   

@@ -493,7 +493,7 @@ get_espn_data = function(){
         db_path = paste('PLACEHOLDER',paste0('nfl_season=',all_sch$season),gm_unq_id,sep='/')
         
         
-        temp=pbp %>%
+        temp=cur_pbp %>%
           filter(game_id==pbp_id)
         
         passing_pbp = temp %>%
