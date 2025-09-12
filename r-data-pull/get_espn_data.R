@@ -191,9 +191,11 @@ get_espn_data = function(){
 
   
   week_number = full_schedule %>%
-    filter(date<= Sys.Date(),
+    filter(date<= Sys.Date()+2,
            season_name != 'preseason') %>%
     arrange(desc(date))
+  print('Week Number')
+  print(head(week_number))
   week_number = ifelse(nrow(week_number)==0,1,week_number$season_week[1])
   s3saveRDS(week_number,bucket = s3_bucket, object = 'admin/current_week.rds')
   
