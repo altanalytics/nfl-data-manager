@@ -12,6 +12,17 @@ get_espn_data = function(){
   
   # Get Existing ESPN Game details
   espn_game_details = s3readRDS(bucket = s3_bucket, object = 'admin/espn_api_game_detail.rds')
+  
+  cur_sved_schedule = aws.s3::s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'admin/full_schedule.csv') 
+  
+  week_number = cur_sved_schedule %>%
+    filter(date<= Sys.Date()+3,
+           season_name != 'preseason') %>%
+    arrange(desc(date))
+  print('Week Number')
+  print(head(week_number))
+  week_number = ifelse(nrow(week_number)==0,1,week_number$season_week[1])
+  s3saveRDS(week_number,bucket = s3_bucket, object = 'admin/current_week.rds')
 
   
   #############################
@@ -188,16 +199,6 @@ get_espn_data = function(){
   s3_csv_save(schedule,path='clean_schedule/clean_schedule.csv', bucket = s3_db)
   
   s3_csv_save(full_schedule,path='admin/full_schedule.csv')
-
-  
-  week_number = full_schedule %>%
-    filter(date<= Sys.Date()+2,
-           season_name != 'preseason') %>%
-    arrange(desc(date))
-  print('Week Number')
-  print(head(week_number))
-  week_number = ifelse(nrow(week_number)==0,1,week_number$season_week[1])
-  s3saveRDS(week_number,bucket = s3_bucket, object = 'admin/current_week.rds')
   
   ###Get PBP Schedule
   nfl_r_sched = nflfastR::fast_scraper_schedules()
