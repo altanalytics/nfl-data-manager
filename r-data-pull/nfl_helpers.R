@@ -33,6 +33,9 @@ schedule_df <- s3read_using(FUN=read_csv, bucket = s3_bucket, object = 'fantasy_
   mutate(winner = ifelse(is.na(winner),'TBD',winner),
          loser = ifelse(is.na(loser),'TBD',loser))
 
+pro_teams = aws.s3::s3readRDS(bucket = s3_bucket, object = 'fantasy_data/espn_pro_teams.rds')
+
+
 ### Primary Execution Function Handler
 exec_func = function(func_name, ...){
 
@@ -218,6 +221,7 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
     filter(search_period == scoringPeriodId, seasonId == fant_yr) %>%
     mutate(score_type = ifelse(nchar(externalId)<8,'projected','actual'),
            espn_league = as.numeric(espn_league),
+           player_team = as.character(player_team),
            upd_player_slot = ifelse(player_slot==23,7,player_slot),
            player_position = case_when(player_position_id==1 ~ 'QB',
                                        player_position_id==2 ~ 'RB',
@@ -227,8 +231,9 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
                                        player_position_id==16 ~ 'D/ST',
                                        TRUE ~ 'UNK')) %>%
     left_join(select(team_df,espn_league,team_id=espn_league_team_id,bbr_team_id = team_number)) %>%
+    left_join(select(pro_teams,player_team = team_id,abbreviation)) %>%
     select(espn_league,team_abbrev:search_period,player_position,bbr_team_id,scoringPeriodId,
-           seasonId,upd_player_slot,score_type,appliedTotal)%>%
+           seasonId,upd_player_slot,score_type,appliedTotal,abbreviation)%>%
     pivot_wider(names_from = score_type, values_from = appliedTotal) %>%
     arrange(team_id,upd_player_slot) %>%
     group_by(bbr_team_id)-> roster_df
@@ -262,7 +267,6 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
 # Do full loop on Fantasy periods
 espn_fantasy_loop = function(periods = c(1:12)){
   
-
     for(espn_period in periods){
       print('ESPN Period:')
       print(espn_period)
@@ -284,10 +288,12 @@ espn_fantasy_loop = function(periods = c(1:12)){
       sched_all %>%
         filter(week == espn_period) %>%
         left_join(tibble(week = espn_period, unique_slot = c(1:50))) %>%
-        left_join(select(roster_all, espn_league, unique_slot, home_player_slot = player_slot, home_team = team_id, home_player = player_name, home_bbr_team_id = bbr_team_id,
-                         home_projected=projected,home_actual=actual, home_projected_total = projected_total, home_actual_total = actual_total)) %>%
-        left_join(select(roster_all, espn_league, unique_slot, away_player_slot = player_slot, away_team = team_id, away_player = player_name, away_bbr_team_id = bbr_team_id,
-                         away_projected=projected,away_actual=actual, away_projected_total = projected_total, away_actual_total = actual_total)) %>%
+        left_join(select(roster_all, espn_league, unique_slot, home_player_slot = player_slot, home_team = team_id, home_player = player_name, 
+                         home_bbr_team_id = bbr_team_id, home_pro_team = abbreviation, home_projected=projected,home_actual=actual, 
+                         home_projected_total = projected_total, home_actual_total = actual_total, home_position = player_position)) %>%
+        left_join(select(roster_all, espn_league, unique_slot, away_player_slot = player_slot, away_team = team_id, away_player = player_name, 
+                         away_bbr_team_id = bbr_team_id, away_pro_team = abbreviation, away_projected=projected,away_actual=actual, 
+                         away_projected_total = projected_total, away_actual_total = actual_total, away_position = player_position)) %>%
         filter(!is.na(home_player) | !is.na(away_player)) %>%
         group_by(week,game_id,espn_league) %>%
         mutate(game_type = 'espn') %>%
@@ -295,7 +301,8 @@ espn_fantasy_loop = function(periods = c(1:12)){
       
       pre_internal %>%
         mutate(home_player = 'TOTAL',away_player = 'TOTAL',unique_slot = 0) %>%
-        group_by(game_type,espn_league,week,game_id,unique_slot,home_bbr_team_id,home_player,away_bbr_team_id,away_player) %>%
+        group_by(game_type,espn_league,week,game_id,unique_slot,home_bbr_team_id,
+                 home_player,home_position,home_pro_team,away_bbr_team_id,away_player,away_position,away_pro_team) %>%
         summarise(home_projected = sum(home_projected_total,na.rm = T), home_actual = sum(home_actual_total,na.rm = T), 
                   away_projected = sum(away_projected_total,na.rm = T),away_actual = sum(away_actual_total,na.rm = T)) %>%
         filter(!is.na(home_bbr_team_id),!is.na(away_bbr_team_id)) -> pre_totals
@@ -307,14 +314,16 @@ espn_fantasy_loop = function(periods = c(1:12)){
       
       schedule_df %>%
         mutate(game_id = row_number()+200,
-               espn_league = '10101010') %>%
+               espn_league = 10101010) %>%
         select(week,game_id,home_team = home,away_team = away,espn_league) %>%
         filter(week == espn_period) %>%
         left_join(tibble(week = espn_period, unique_slot = c(1:50))) %>%
-        left_join(select(roster_all, unique_slot, home_player_slot = player_slot, home_team = bbr_team_id, home_player = player_name, home_bbr_team_id = bbr_team_id,
-                         home_projected=projected,home_actual=actual, home_projected_total = projected_total, home_actual_total = actual_total)) %>%
-        left_join(select(roster_all, unique_slot, away_player_slot = player_slot, away_team = bbr_team_id, away_player = player_name, away_bbr_team_id = bbr_team_id,
-                         away_projected=projected,away_actual=actual, away_projected_total = projected_total, away_actual_total = actual_total)) %>%
+        left_join(select(roster_all, espn_league, unique_slot, home_player_slot = player_slot, home_team = team_id, home_player = player_name, 
+                         home_bbr_team_id = bbr_team_id, home_pro_team = abbreviation, home_projected=projected,home_actual=actual, 
+                         home_projected_total = projected_total, home_actual_total = actual_total, home_position = player_position)) %>%
+        left_join(select(roster_all, espn_league, unique_slot, away_player_slot = player_slot, away_team = team_id, away_player = player_name, 
+                         away_bbr_team_id = bbr_team_id, away_pro_team = abbreviation, away_projected=projected,away_actual=actual, 
+                         away_projected_total = projected_total, away_actual_total = actual_total, away_position = player_position)) %>%
         filter(!is.na(home_player) | !is.na(away_player)) %>%
         group_by(week,game_id,espn_league) %>%
         mutate(game_type = 'blacktop') %>%
@@ -322,7 +331,8 @@ espn_fantasy_loop = function(periods = c(1:12)){
       
       pre_external %>%
         mutate(home_player = 'TOTAL',away_player = 'TOTAL',unique_slot = 0) %>%
-        group_by(game_type,espn_league,week,game_id,unique_slot,home_bbr_team_id,home_player,away_bbr_team_id,away_player) %>%
+        group_by(game_type,espn_league,week,game_id,unique_slot,home_bbr_team_id,
+                 home_player,home_position,away_bbr_team_id,away_player,away_position) %>%
         summarise(home_projected = sum(home_projected_total,na.rm = T), home_actual = sum(home_actual_total,na.rm = T), 
                   away_projected = sum(away_projected_total,na.rm = T),away_actual = sum(away_actual_total,na.rm = T)) %>%
         filter(!is.na(home_bbr_team_id),!is.na(away_bbr_team_id)) -> pre_totals
@@ -446,3 +456,23 @@ calc_league_scores = function(){
   
 }
 
+
+# nfl_teams = GET('https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams') %>% content()
+# team_df = NULL
+# for(tm in nfl_teams$sports[[1]]$leagues[[1]]$teams){
+#   temp = tibble(
+#      team_id = tm$team$id,
+#      team_slug = tm$team$slug,
+#      abbreviation = tm$team$abbreviation,
+#      display_name = tm$team$displayName,
+#      short_name = tm$team$shortDisplayName,
+#      nickname = tm$team$nickname,
+#      location = tm$team$location
+#   )
+#   team_df = rbind(team_df,temp)
+# }
+# 
+#  aws.s3::s3saveRDS(team_df,bucket = s3_bucket, object = 'fantasy_data/espn_pro_teams.rds')
+          
+          
+          
