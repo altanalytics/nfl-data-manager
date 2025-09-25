@@ -238,9 +238,6 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
     arrange(team_id,upd_player_slot) %>%
     group_by(bbr_team_id)-> roster_df
   
-  roster_df %>%
-    group_by(player_position_id) %>%
-    summarise(name = min(player_name))
   # Fof future weeks, add in value of 0
   if(!('actual' %in% colnames(roster_df))){
     roster_df$actual = 0
@@ -266,7 +263,7 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
 
 # Do full loop on Fantasy periods
 espn_fantasy_loop = function(periods = c(1:12)){
-  
+
     for(espn_period in periods){
       print('ESPN Period:')
       print(espn_period)
@@ -300,7 +297,9 @@ espn_fantasy_loop = function(periods = c(1:12)){
         ungroup() -> pre_internal
       
       pre_internal %>%
-        mutate(home_player = 'TOTAL',away_player = 'TOTAL',unique_slot = 0) %>%
+        mutate(home_player = 'TOTAL',away_player = 'TOTAL',home_position = 'TOTAL',away_position = "TOTAL",
+               home_pro_team = 'TOTAL', away_pro_team = 'TOTAL',
+               unique_slot = 0) %>%
         group_by(game_type,espn_league,week,game_id,unique_slot,home_bbr_team_id,
                  home_player,home_position,home_pro_team,away_bbr_team_id,away_player,away_position,away_pro_team) %>%
         summarise(home_projected = sum(home_projected_total,na.rm = T), home_actual = sum(home_actual_total,na.rm = T), 
@@ -318,11 +317,11 @@ espn_fantasy_loop = function(periods = c(1:12)){
         select(week,game_id,home_team = home,away_team = away,espn_league) %>%
         filter(week == espn_period) %>%
         left_join(tibble(week = espn_period, unique_slot = c(1:50))) %>%
-        left_join(select(roster_all, espn_league, unique_slot, home_player_slot = player_slot, home_team = team_id, home_player = player_name, 
-                         home_bbr_team_id = bbr_team_id, home_pro_team = abbreviation, home_projected=projected,home_actual=actual, 
+        left_join(select(roster_all, unique_slot, home_player_slot = player_slot, home_team = bbr_team_id, home_player = player_name,
+                         home_bbr_team_id = bbr_team_id, home_pro_team = abbreviation, home_projected=projected,home_actual=actual,
                          home_projected_total = projected_total, home_actual_total = actual_total, home_position = player_position)) %>%
-        left_join(select(roster_all, espn_league, unique_slot, away_player_slot = player_slot, away_team = team_id, away_player = player_name, 
-                         away_bbr_team_id = bbr_team_id, away_pro_team = abbreviation, away_projected=projected,away_actual=actual, 
+        left_join(select(roster_all, unique_slot, away_player_slot = player_slot, away_team = bbr_team_id, away_player = player_name,
+                         away_bbr_team_id = bbr_team_id, away_pro_team = abbreviation, away_projected=projected,away_actual=actual,
                          away_projected_total = projected_total, away_actual_total = actual_total, away_position = player_position)) %>%
         filter(!is.na(home_player) | !is.na(away_player)) %>%
         group_by(week,game_id,espn_league) %>%
@@ -330,9 +329,11 @@ espn_fantasy_loop = function(periods = c(1:12)){
         ungroup() -> pre_external
       
       pre_external %>%
-        mutate(home_player = 'TOTAL',away_player = 'TOTAL',unique_slot = 0) %>%
+        mutate(home_player = 'TOTAL',away_player = 'TOTAL',home_position = 'TOTAL',away_position = "TOTAL",
+               home_pro_team = 'TOTAL', away_pro_team = 'TOTAL',
+               unique_slot = 0) %>%
         group_by(game_type,espn_league,week,game_id,unique_slot,home_bbr_team_id,
-                 home_player,home_position,away_bbr_team_id,away_player,away_position) %>%
+                 home_player,home_position,home_pro_team,away_bbr_team_id,away_player,away_position,away_pro_team) %>%
         summarise(home_projected = sum(home_projected_total,na.rm = T), home_actual = sum(home_actual_total,na.rm = T), 
                   away_projected = sum(away_projected_total,na.rm = T),away_actual = sum(away_actual_total,na.rm = T)) %>%
         filter(!is.na(home_bbr_team_id),!is.na(away_bbr_team_id)) -> pre_totals
@@ -341,7 +342,7 @@ espn_fantasy_loop = function(periods = c(1:12)){
         select(colnames(pre_totals)) %>%
         rbind(pre_totals) %>%
         arrange(week,game_id,unique_slot)
-      
+
       rbind(internals,externals) %>%
         arrange(game_type,espn_league,week,game_id,unique_slot) %>%
         left_join(select(team_df,home_bbr_team_id=team_number,home_team=team_name)) %>%
