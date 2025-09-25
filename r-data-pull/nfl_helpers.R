@@ -187,6 +187,7 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
       player_status = p$status
       player_team = p$playerPoolEntry$player$proTeamId
       player_id = p$playerId
+      player_position = p$playerPoolEntry$player$defaultPositionId
       for(st in p$playerPoolEntry$player$stats){
         st$appliedStats = NULL
         st$stats = NULL
@@ -195,6 +196,7 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
                          team_abbrev = team_abbrev,
                          team_id = team_id,
                          player_name = player_name,
+                         player_position_id = player_position,
                          player_slot = player_slot,
                          player_injury_status = player_injury_status,
                          player_default_pos_id = player_default_pos_id,
@@ -216,14 +218,24 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
     filter(search_period == scoringPeriodId, seasonId == fant_yr) %>%
     mutate(score_type = ifelse(nchar(externalId)<8,'projected','actual'),
            espn_league = as.numeric(espn_league),
-           upd_player_slot = ifelse(player_slot==23,7,player_slot)) %>%
+           upd_player_slot = ifelse(player_slot==23,7,player_slot),
+           player_position = case_when(player_position_id==1 ~ 'QB',
+                                       player_position_id==2 ~ 'RB',
+                                       player_position_id==3 ~ 'WR',
+                                       player_position_id==4 ~ 'TE',
+                                       player_position_id==5 ~ 'K',
+                                       player_position_id==16 ~ 'D/ST',
+                                       TRUE ~ 'UNK')) %>%
     left_join(select(team_df,espn_league,team_id=espn_league_team_id,bbr_team_id = team_number)) %>%
-    select(espn_league,team_abbrev:search_period,bbr_team_id,scoringPeriodId,seasonId,upd_player_slot,score_type,appliedTotal)%>%
+    select(espn_league,team_abbrev:search_period,player_position,bbr_team_id,scoringPeriodId,
+           seasonId,upd_player_slot,score_type,appliedTotal)%>%
     pivot_wider(names_from = score_type, values_from = appliedTotal) %>%
     arrange(team_id,upd_player_slot) %>%
     group_by(bbr_team_id)-> roster_df
   
-  
+  roster_df %>%
+    group_by(player_position_id) %>%
+    summarise(name = min(player_name))
   # Fof future weeks, add in value of 0
   if(!('actual' %in% colnames(roster_df))){
     roster_df$actual = 0
@@ -252,6 +264,7 @@ espn_fantasy_loop = function(periods = c(1:12)){
   
 
     for(espn_period in periods){
+      print('ESPN Period:')
       print(espn_period)
       tm_lst = unique(team_df$espn_league)
       lg1 = espn_list_func(tm_lst[1],espn_period,year(Sys.Date()))
