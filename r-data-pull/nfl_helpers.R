@@ -263,7 +263,7 @@ espn_list_func = function(espn_league,espn_period,fant_yr){
 
 # Do full loop on Fantasy periods
 espn_fantasy_loop = function(periods = c(1:12)){
-
+    
     for(espn_period in periods){
       print('ESPN Period:')
       print(espn_period)
@@ -351,6 +351,26 @@ espn_fantasy_loop = function(periods = c(1:12)){
       
       s3write_using(weekly_data, write_csv, 
                     bucket = s3_bucket, object = paste0('fantasy_data/week_',espn_period,'.csv'))
+      
+      pre_totals %>%
+        ungroup() %>%
+        select(week,home=home_bbr_team_id,away=away_bbr_team_id,home_actual,away_actual) -> results
+      schedule_df %>%
+        left_join(results) %>% 
+        mutate(home_points = ifelse(is.na(home_actual),home_points,home_actual),
+               away_points = ifelse(is.na(away_actual),away_points,away_actual),
+               winner = ifelse(home_points>away_points,home,
+                               ifelse(away_points>home_points,away,'TIE')),
+               loser = ifelse(home_points>away_points,away,
+                               ifelse(away_points>home_points,home,'TIE')),
+               winning_league = ifelse(winner == 'TIE','None',
+                                      ifelse(as.numeric(winner)<13,'Minivan Mayhem','Snacktime Bandits')),
+               winning_team = ifelse(winner == 'TIE','TIE', ifelse(as.numeric(winner)==home,'home','away')),
+               winning_name = ifelse(winner == 'TIE','TIE', ifelse(as.numeric(winner)==home,home_team,away_team)),
+               home_actual = NULL,
+               away_actual = NULL) -> schedule_df
+      s3write_using(schedule_df,FUN=write_csv, bucket = s3_bucket, object = 'fantasy_data/bbr_schedule.csv')
+        
       
     }
   
