@@ -356,6 +356,9 @@ espn_fantasy_loop = function(periods = c(1:12)){
         ungroup() %>%
         select(week,home=home_bbr_team_id,away=away_bbr_team_id,home_actual,away_actual) -> results
       schedule_df %>%
+        left_join(select(team_df,home=team_number,new_home = team_name)) %>%
+        left_join(select(team_df,away=team_number,new_away = team_name)) %>%
+        mutate(home_team = new_home, away_team = new_away, new_home = NULL, new_away = NULL) %>% 
         left_join(results) %>% 
         mutate(home_points = ifelse(is.na(home_actual),home_points,home_actual),
                away_points = ifelse(is.na(away_actual),away_points,away_actual),
