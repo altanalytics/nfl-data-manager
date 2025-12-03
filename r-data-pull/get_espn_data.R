@@ -30,7 +30,7 @@ get_espn_data = function(){
   #############################
   
   if(weekdays(Sys.Date()) %in% c('Tuesday','Thursday','Saturday')){
-    num_run = c(1:12)
+    num_run = c(1:16)
   } else {
     num_run = s3readRDS(bucket = s3_bucket, object = 'admin/current_week.rds')
   }
